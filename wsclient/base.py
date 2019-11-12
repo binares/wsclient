@@ -3,7 +3,7 @@ from .sub import SubscriptionHandler, Merged
 from .interpreter import Interpreter
 from .channel import ChannelsInfo
 from .url import URLFactory
-from .extend_attrs import ExtendAttrs
+from .extend_attrs import WSMeta
 from .transport import Transport
 
 from fons.dict_ops import deep_update, deep_get
@@ -18,13 +18,15 @@ import copy as _copy
 
 logger,logger2,tlogger,tloggers,tlogger0 = _log.get_standard_5(__name__)
 
-_WSWRAPPER_NAMES = set()
+_WSCLIENT_NAMES = set()
 _ASC = ''.join(chr(i) for i in range(128))
 _ALNUM_ = ''.join(x for x in _ASC if x.isalnum()) + '_'
+_ALPHA_ = ''.join(x for x in _ASC if x.isalpha()) + '_'
+_ALNUM_DOT_ = _ALNUM_ + '.'
 _quit_command = object()
 
 
-class WSClient(metaclass=ExtendAttrs):
+class WSClient(metaclass=WSMeta):
     auth_defaults = {
         'required': None, #if False, .sign procedure will not be invoked even if channel's "is_private" is True
                           #if True, will not be evoked even if "is_private" is False
@@ -69,7 +71,7 @@ class WSClient(metaclass=ExtendAttrs):
         #set to "on_cnx_activation" for the sub to be activated when its cnx is activated
         'auto_activate': True,
     }
-    #If "is_private" is set to True, .auth() is called on the specific output to server
+    #If "is_private" is set to True, .sign() is called on the specific output to server
 
     # {
     #    "channel": {
@@ -139,13 +141,24 @@ class WSClient(metaclass=ExtendAttrs):
         #'orderbook_sends_bidAsk',
     ]
     __deepcopy_on_init__ = __extend_attrs__[:]
-    __properties__ = []
+    
+    #To be initiated during the creation of the class,
+    # and in every subclass that has its own __properties__
+    #property_name, attr_name, getter_enabled(<bool>), setter_enabled, deleter_enabled
+    # (by default all 3 are True)
+    __properties__ = [['channels_info','cis'],
+                      ['connection_manager','cm'],
+                      ['interpreter','ip'],
+                      ['subscription_handler','sh'],
+                      ['transport','tp'],]
+    
     #whether or not socket .recv and .send run on a thread or not
     # (message handler runs on main thread)
     #possibly useful to avoid handler slowing down .recv, which
     # may cause some messages from the server to be missed
     #sockets_per_thread = None
-    name_registry = _WSWRAPPER_NAMES
+    
+    name_registry = _WSCLIENT_NAMES
     
     ChannelsInfo_cls = ChannelsInfo
     ConnectionManager_cls = ConnectionManager
@@ -176,8 +189,6 @@ class WSClient(metaclass=ExtendAttrs):
         
         self._closed = False
         
-        self._init_properties()
-        
         for ch_values in list(self.channels.values()) + [self.channel_defaults]:
             if ch_values.get('url') is not None:
                 ch_values['url_factory'] = URLFactory(self, ch_values['url'])
@@ -189,32 +200,6 @@ class WSClient(metaclass=ExtendAttrs):
         if getattr(self,'subscriptions',None) is not None:
             for params in self.subscriptions:
                 self.sh.add_subscription(params)
-        
-        
-    def _init_properties(self):
-        new = {}
-        partial = functools.partial
-        for attr in self.__dict__:
-            for startsWith,replaceWith in zip(['subscribe_to_','unsubscribe_to_'],
-                                              ['sub_to_','unsub_to_']):
-                if attr.startswith(startsWith):
-                    property_name = replaceWith + startsWith[len(startsWith):]
-                    new[property_name] = property(partial(getattr,self,attr))
-
-        for property_name,attr in [['channels_info','cis'],
-                                   ['connection_manager','cm'],
-                                   ['interpreter','ip'],
-                                   ['subscription_handler','sh'],
-                                   ['transport','tp'],] + \
-                                   self.__properties__:
-            assert all(x in _ALNUM_ for x in attr)
-            _setattr = eval("lambda x: setattr(self,'{}',x)".format(attr))
-            new[property_name] = \
-                    property(partial(getattr,self,attr),
-                             _setattr,
-                             partial(delattr,self,attr))
-        for p_name,p in new.items():
-            setattr(self,p_name,p)
         
         #self.start.__doc__ = self.tp.start.__doc__    
         #self.send.__doc__ = self.tp.send.__doc__
