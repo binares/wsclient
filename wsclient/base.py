@@ -1,11 +1,13 @@
 from .conn_mgr import ConnectionManager
-from .sub import SubscriptionHandler, Merged
+from .sub import SubscriptionHandler
+from .merged import Merged
 from .interpreter import Interpreter
 from .channel import ChannelsInfo
 from .url import URLFactory
 from .extend_attrs import WSMeta
 from .transport import Transport
 
+from fons.aio import call_via_loop_afut
 from fons.dict_ops import deep_update, deep_get
 from fons.errors import TerminatedException
 from fons.event import Event
@@ -28,11 +30,15 @@ _quit_command = object()
 
 class WSClient(metaclass=WSMeta):
     auth_defaults = {
-        'required': None, #if False, .sign procedure will not be invoked even if channel's "is_private" is True
+        'apply_to_packs': None, #to which packs (that .encode() returns) the following applies
+                                #if None, then to all of them
+                                # example: [0,2] applies to [*pck0*, pck1 ,*pck2*]
+        'is_required': None, #if False, .sign procedure will not be invoked even if channel's "is_private" is True
                           #if True, will not be evoked even if "is_private" is False
-        'via_url': False, #if True, authentication will not be evoked (regardless of "required" nad "is_private")
+        'via_url': False, #if True, authentication will not be evoked (regardless of "required" and "is_private")
         'takes_input': True, #whether or not .sign takes .encode() output as its first argument
         'each_time': False, #if True, then .sign procedure will be invoked each time when "is_private" is True
+                            #otherwise only if connection has not been authenticated yet (cnxi.authenticated)
         'send_separately': False, #if True, the .sign() output is sent separately (followed by the initial message)
         'set_authenticated': None, #if True, then cnxi.authenticated will be set only after send_separately is performed (in .tp.send)
                                      # .sign is invoked by one of the listed channels; otherwise always
@@ -93,13 +99,27 @@ class WSClient(metaclass=WSMeta):
         'hub_methods': [],
         'connect_timeout': None,
         'reconnect_try_interval': 30,
-        'recv_timeout': None,
+        #if current_time > last_message_recived_timestamp + recv_timeout,
+        #it assumes that the connection has been lost, and force crashes-reconnects
+        #the socket
+        'recv_timeout': None, #seconds
         #timeout for "send" response (if expected)
         'waiter_timeout': 5,
         #function that returns ping message to be sent to the socket
+        #if it is a method of subclass, can be given as 'm$method_name_here'
+        #if 'ping_as_message' == False, this may be left to None
         'ping': None,
-        #This must be overriden if .ping is used
+        #This must be overriden to activate the ping utility
         'ping_interval': None,
+        #if specified, ping ticker only sends the message if
+        #current_time > last_message_received_timestamp + ping_after
+        'ping_after': None, #in seconds
+        #instead sending as raw bytes (via .ping of connection's socket)
+        #sends the ping as an ordinary message (json decodes and sends it)
+        'ping_as_message': False,
+        #Only applies if 'ping_as_message' == False, force crashes-reconnects
+        #the socket if no pong frame is received within that time
+        'ping_timeout': 5,
         'poll_interval': 0.05,
         'max_subscriptions': None,
         #the interval between pushing (sending) individual subscriptions to the server
@@ -108,6 +128,7 @@ class WSClient(metaclass=WSMeta):
     connection_profiles = {}
     
     url_components = {}
+    
     #since socket interpreter may clog due to high CPU usage,
     # maximum lengths for the queues are set, and if full,
     # previous items are removed one-by-one to make room for new ones
@@ -206,7 +227,13 @@ class WSClient(metaclass=WSMeta):
         
         
     def start(self):
-        return asyncio.ensure_future(self.tp.start(), loop=self.loop)
+        if self._closed:
+            raise TerminatedException("'{}' is closed".format(self.ww.name))
+        
+        if asyncio.get_event_loop() is self.loop:
+            return asyncio.ensure_future(self.tp.start())
+        else:
+            return call_via_loop_afut(self.tp.start, loop=self.loop)
     
     
     def on_start(self):
@@ -222,6 +249,9 @@ class WSClient(metaclass=WSMeta):
            :param request: a Request / Subscription object (containing .params)
            :param sub: if None, this is a non-subscription request. 
                        Otherwise True for subbing and False for unsubbing.
+           :returns: output               | (non-tuple) 
+                     (output, message_id) | (tuple)
+                     .merge([pck0, pck1, ...]) where `pck` is on of the two above
             The output will be sent to socket (but before that json encoding will be applied)"""
         raise NotImplementedError
     
@@ -242,10 +272,7 @@ class WSClient(metaclass=WSMeta):
         except Exception as e:
             logger.error('{} - could not extract id: {}. r: {}.'.format(self.name, e, r))
             return None
-        
     
-    #async def create_connection_url(self, base_url, *args, **kw):
-    #    return base_url
                 
     def handle(self, R):
         """:type R: Response
@@ -294,7 +321,8 @@ class WSClient(metaclass=WSMeta):
         """Listen for queue (default is event queue)
            :param channel: "event" and "recv" channels are being sent to"""
         #event queue receives ("socket","empty"), ("active",1) and ("active",0) events
-        # ("active" isn't related to cnx-s, but whether or not WSClient is running)
+        # ("active" isn't related to cnx-s, but whether or not WSClient has pushed its subscriptions
+        #   and is ready to accept from send queue)
         await asyncio.wait_for(self.tp.station.get_queue(channel, queue_id).wait(), timeout)
         
         
@@ -312,10 +340,10 @@ class WSClient(metaclass=WSMeta):
         
     
     def stop(self):
-        running = self.tp.station.get_event('running', 0, loop=0)
-        if running.is_set():
-            self.cm.remove_all()
-            self.tp.stop()
+        if asyncio.get_event_loop() is self.loop:
+            return asyncio.ensure_future(self.tp.stop())
+        else:
+            return call_via_loop_afut(self.tp.stop, loop=self.loop)
     
     def close(self):
         if self._closed:

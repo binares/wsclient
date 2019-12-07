@@ -9,6 +9,7 @@ import fons.log as _log
 from fons.event import Station
 
 from .errors import (SubscriptionError, SubscriptionLimitExceeded)
+from .merged import Merged
 from .transport import Request
 
 
@@ -184,7 +185,7 @@ class SubscriptionHandler:
         # (after *compulsory* stopping in "no send" case, as that is the only way to stop its feed),
         # re-subscribing on the old cnx could cause delay due to the old's "stop" future not having completed yet
         #Thus to guarantee the fluency it's better to delete the cnx entirely
-        send = self.ww.cis.get_value(channel,'send',True)
+        send = self.ww.cis.get_value(s.channel,'send',True)
         #Cnx with param variance probably can't be reused
         #if s.is_merger() and not any(s.cnx is _s.cnx for _s in self.subscriptions):
         if not send and not any(s.cnx is _s.cnx for _s in self.subscriptions):
@@ -268,11 +269,14 @@ class SubscriptionHandler:
             self.change_subscription_state(uid, 0)
     
     
-    def change_subscription_state(self, x, state):
+    def change_subscription_state(self, x, state, cnx_active=False):
         #TODO: force state to 0 if not self.is_running() ?
         s = self.get_subscription(x)
         prev_state = s.state
         if prev_state == state:
+            return
+        
+        if state and cnx_active and (s.cnx is None or not s.cnx.is_active()):
             return
         
         s.state = state
@@ -477,7 +481,3 @@ class SubscriptionMerger(Subscription):
     @property
     def mp(self):
         return self.merge_param
-    
-  
-class Merged(tuple):
-    pass

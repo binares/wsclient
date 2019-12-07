@@ -31,13 +31,19 @@ class Connection:
     def __init__(self, url, handle=None,*, on_activate=None,
                  signalr=False, hub_name=None, hub_methods=None,
                  reconnect_try_interval=None, connect_timeout=None, recv_timeout=None, 
-                 rate_limit=None, ping_interval=None, ping=None, poll_interval=None, 
+                 ping_interval=None, ping=None, ping_after=None, ping_timeout=5,
+                 ping_as_message=False, rate_limit=None, poll_interval=None,
                  queue_maxsizes={}, recv_queue=None, event_queue=None,
                  id=None, name_prefix=None, loop=None, out_loop=None, throttle_logging_level=0):
-        """:param url: str or (coroutine) function that returns str
-           :param handle: (sync) function or list of functions (or None)
-           :param on_activate: (a)sync function or list of functions (or None)
-           :param out_loop: for station events and queues (recv [received] queue, event queue)"""
+        """
+        :param url: str or (coroutine) function that returns str
+        :param handle: (sync) function or list of functions (or None)
+        :param on_activate: (a)sync function or list of functions (or None)
+        :param out_loop: for station events and queues (recv [received] queue, event queue)
+        """
+        if ping_interval is not None and not ping_as_message and signalr:
+            raise ValueError('Cannot send raw ping frames if `signalr` is set to True. ' \
+                             'You could enable `ping_as_message` instead.')
         self.url = url
         self.handle = handle
         self.on_activate = on_activate
@@ -70,6 +76,9 @@ class Connection:
         
         self.ping_func = ping
         self.ping_interval = ping_interval
+        self.ping_after = ping_after
+        self.ping_as_message = ping_as_message
+        self.ping_timeout = ping_timeout
         self.ping_ticker = None
         
         self.station = Station(loops = {-1: self.loop, 
@@ -106,6 +115,7 @@ class Connection:
                                       'on_activate', 'signalr_wait'])
         self.connected_ts = None
         self.last_recv_ts = None
+        self._last_ping_ts = None
         self._ignore_recv_ts = False
         self._stopped = False
         
@@ -251,10 +261,10 @@ class Connection:
                 except websockets.ConnectionClosed:
                     await self._on_websocket_error()
                 except json.JSONDecodeError as e:
-                    str_r = str(r)
-                    dots = '...' if len(str_r) > 200 else ''
+                    dots = '...' if len(result) > 200 else ''
                     logger2.error("{} - non json-decodable response: {}{}"\
-                                  .format(self.name, str_r[:200], dots))
+                                  .format(self.name, result[:200], dots))
+                    logger.error(result)
                     logger.exception(e)
                 else:
                     if self.handle is not None:
@@ -309,7 +319,7 @@ class Connection:
     async def _on_websocket_error(self):
         self._ignore_recv_ts = True
         if self._stopped: return
-        logger2.debug("{}'s connection has crashed. Reconnecting.".format(self.name))
+        logger2.debug("{}'s websocket has crashed. Reconnecting.".format(self.name))
         self.station.broadcast('active', op='clear')
         self.broadcast_event('socket', 0)
         await self._safe_activate(None)
@@ -321,7 +331,7 @@ class Connection:
         #----
         async def get_from_queue():
             r = await self._socket_recv_queue.get()
-            if type(r) is websockets.ConnectionClosed:
+            if isinstance(r, websockets.ConnectionClosed):
                 raise r
             return r
         return asyncio.ensure_future(get_from_queue())
@@ -347,8 +357,26 @@ class Connection:
             self.hub.server.invoke(*message)
     
     async def ping(self):
-        message = self.ping_func()
-        await self.send(message)
+        try:
+            last_ts = max(self._last_ping_ts, self.last_recv_ts)
+        except TypeError:
+            last_ts = next((x for x in (self._last_ping_ts, self.last_recv_ts) if x), 0)
+        
+        if self.ping_after is None or time.time() > last_ts + self.ping_after:
+            tlogger.debug('{} - sending ping'.format(self.name))
+            if self.ping_as_message:
+                message = self.ping_func()
+                #message will be json encoded
+                await self.send(message)
+            else:
+                args = [self.ping_func()] if self.ping_func is not None else []
+                #message will be converted into bytes (must be str or bytes)
+                try: await asyncio.wait_for(self.socket.ping(*args), self.ping_timeout)
+                except asyncio.TimeoutError:
+                    await self._socket_recv_queue.put(
+                        websockets.ConnectionClosed(-3, 'Ping timeout occurred'))
+                finally:
+                    self._last_ping_ts = time.time()
         
     async def throttle(self):
         await self._throttle()

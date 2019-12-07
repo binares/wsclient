@@ -99,10 +99,15 @@ class ConnectionInfo:
     def is_private(self):
         pass
     
-    def auth_seq(self, channel):
+    def auth_seq(self, channel, i=None):
         auth = self.ww.cis.get_value(channel,'auth',{})
-        auth0 = self.ww.auth_defaults
-        return [auth, auth0]
+        defaults = self.ww.auth_defaults
+        if i is None:
+            return [auth, defaults]
+        else:
+            auth_i = auth.get(i, {})
+            defaults_i = defaults.get(i, {})
+            return [auth_i, auth, defaults_i, defaults]
     
     def get_auth_value(self, channel, *args, **kw):
         """Deep get auth value of channel"""

@@ -11,6 +11,6 @@ __author__ = 'binares'
 
 from .conn import Connection, ConnectionEvent
 from .base import WSClient
-from .sub import Merged
+from .merged import Merged
 from .transport import set_sockets_per_thread
 from .errors import (WSError, SubscriptionError, SubscriptionLimitExceeded)

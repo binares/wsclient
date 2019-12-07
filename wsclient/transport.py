@@ -6,10 +6,13 @@ from fons.event import (Station, force_put)
 from fons.threads import EliThread
 import fons.log as _log
 
+import sys
 import asyncio
 import copy as _copy
 import functools
 from collections import defaultdict
+
+from .sub import Merged
 
 logger,logger2,tlogger,tloggers,tlogger0 = _log.get_standard_5(__name__)
 
@@ -77,40 +80,63 @@ class Transport:
                      {'channel': 'recv', 'id': 0, 'queue': False, 'event': None, 'loops': [0]},
                      {'channel': 'empty', 'id': 0, 'queue': False, 'event': None, 'loops': [0]},
                      {'channel': 'running', 'id': 0, 'queue': False, 'event': None, 'loops': [0,-1]},
-                     {'channel': 'active', 'id': 0, 'queue': False, 'event': None, 'loops': [0,-1]}],
+                     {'channel': 'stopped', 'id': 0, 'queue': False, 'event': None, 'loops': [0,-1]},
+                     {'channel': 'active', 'id': 0, 'queue': False, 'event': None, 'loops': [0,-1]},
+                     {'channel': 'inactive', 'id': 0, 'queue': False, 'event': None, 'loops': [0,-1]},],
                     default_queue_size = 100,
                     loops = {0: self.ww.loop, -1: self.ww._loop},
                     name = self.ww.name+'[Station]')
-            
+        
+        self.station.broadcast('inactive')
+        self.station.broadcast('stopped')
         self.waiters = {}
-        
-        
+        self.futures = {}
+    
+    
     async def start(self):
-        if self.ww._closed:
-            raise TerminatedException("'{}' is closed".format(self.ww.name))
+        if 'stop' in self.futures:
+            try: await self.futures['stop']
+            except Exception: pass
         
-        logger.debug("Starting '{}'".format(self.ww.name))
-        self.station.broadcast('running')
-
-        (await self.ww.on_start()) if asyncio.iscoroutinefunction(self.ww.on_start) else self.ww.on_start()
-
-        _loop = self._thread._loop
-        call_via_loop(wrap_trylog(self._main), loop=_loop, module='asyncio')
-        call_via_loop(self.process_events, loop=_loop, module='asyncio')
-        
-        if not self._thread.isAlive():
-            self._thread.start()
-            """all_active = self.ww.cm.station.get_event('all_active',0)
-            try: await asyncio.wait_for(all_active.wait(), self.connect_timeout)
-            except asyncio.TimeoutError as e:
-                logger2.error('{} - socket connection timed out.'.format(self.ww.name))
-                raise e"""
-
-        await self.process_responses()
-        self.station.broadcast('running', op='clear')
+        if 'start' in self.futures:
+            return await self.futures['start']
+            
+        self.futures['start'] = asyncio.Future()
+        f1 = f2 = None
+        try:
+            logger.debug("Starting '{}'".format(self.ww.name))
+            self.station.broadcast('running')
+            self.station.broadcast('stopped', op='clear')
+    
+            (await self.ww.on_start()) if asyncio.iscoroutinefunction(self.ww.on_start) else self.ww.on_start()
+    
+            _loop = self._thread._loop
+            f1 = call_via_loop(wrap_trylog(self._main), loop=_loop, module='asyncio')
+            f2 = call_via_loop(self.process_events, loop=_loop, module='asyncio')
+            
+            if not self._thread.isAlive():
+                self._thread.start()
+    
+            await self.process_responses()
+            
+            await asyncio.wait([f1,f2])
+            
+        finally:
+            if f1 is not None:
+                f1.cancel()
+            if f2 is not None:
+                f2.cancel()
+            if sys.exc_info()[1] is None:
+                self.futures['start'].set_result(None)
+            else:
+                self.futures['start'].set_exception(sys.exc_info()[1])
+            del self.futures['start']
+            self.station.broadcast('running', op='clear')
+            self.station.broadcast('stopped')
         
         
     async def _main(self):
+        #This runs in self._thread
         loop = self.ww.loop
         _loop = asyncio.get_event_loop()
         
@@ -154,16 +180,20 @@ class Transport:
         await self.ww.sh.push_subscriptions()
         
         self.station.broadcast('active')
+        self.station.broadcast('inactive', op='clear')
         self.ww.broadcast_event('active', 1)
         
-        await _fire_from_send_queue()
-        
-        self.station.broadcast('active', op='clear')
-        self.ww.broadcast_event('active', 0)
-        tlogger.debug('{} - stopped'.format(self.ww.name))
+        try:
+            await _fire_from_send_queue()
+        finally:
+            self.station.broadcast('active', op='clear')
+            self.station.broadcast('inactive')
+            self.ww.broadcast_event('active', 0)
+            tlogger.debug('{} - stopped'.format(self.ww.name))
         
     
     async def process_responses(self):
+        #Process received results from connections. This runs in the main loop (self.loop)
         tlogger.debug('{} - starting response processing'.format(self.ww.name))
         iscoro = asyncio.iscoroutinefunction(self.ww.handle)
         recv = None
@@ -210,6 +240,7 @@ class Transport:
     
     
     async def process_events(self):
+        #Process events from connections. This runs in self._thread
         tlogger.debug('{} - starting event processing'.format(self.ww.name))
         activation_count = defaultdict(int)
         
@@ -261,6 +292,7 @@ class Transport:
            :param id:
              custom id to be attached to the waiter. in that case user must forward the response to
              the waiter manually (e.g. through .handle)
+             if channel sends multiple messages, id may be given as [id0, id1, ..]
            :param cnx: 
              may be specified if params is dict, otherwise cnx of given request will be used 
            :param sub:
@@ -309,50 +341,79 @@ class Transport:
             f.set_result(None)
             return f
         
-        custom_id = id
-        out,id = self.ww.encode(rq,sub)
-        id = custom_id if custom_id is not None else id
-        if add_waiter and id is None:
-            raise RuntimeError('{} - waiter requested but "message_id" was not ' \
-                               'provided / returned by .encode(config)'.format(self.ww.name))
-            
+        packs = self.ww.encode(rq, sub)
+        if not isinstance(packs, Merged):
+            packs = [packs]
+        single = (len(packs) == 1)
+        
         is_private = self.ww.cis.get_value(channel,'is_private')
-        seq = cnxi.auth_seq(channel)
-        auth_required = deep_get(seq,'required',return2=None)
-        takes_input = deep_get(seq,'takes_input',return2=True)
-        via_url = deep_get(seq,'via_url')
-        each_time = deep_get(seq,'each_time')
-        send_separately = deep_get(seq,'send_separately')
-        set_authenticated = deep_get(seq,'set_authenticated',return2=True)
-        tlogger0.debug([params, is_private, auth_required, via_url, each_time, send_separately, '\n',
-              takes_input, set_authenticated, cnxi.authenticated])
+        apply_to_packs = self.ww.cis.get_value(channel,'apply_to_packs')
         
-        if (is_private and auth_required is None or auth_required) and not via_url:
-            _aInp = [out] if takes_input else []
-            if each_time:
-                out = self.ww.sign(*_aInp)
-            elif not cnxi.authenticated:
-                _aOut = self.ww.sign(*_aInp)
-                if not send_separately: 
-                    out = _aOut
-                else:
-                    await cnx.send(_aOut)
+        
+        async def send_pack(i):
+            pck = packs[i]
+            msg_id = None
+            if isinstance(pck, tuple):
+                out, msg_id = pck
+            else:
+                out = pck
+            if id is not None:
+                try: msg_id = id[i] if not isinstance(id, (str,int)) else id
+                except IndexError: pass
+
+            if add_waiter and msg_id is None:
+                raise RuntimeError('{} - waiter requested but "message_id" was not ' \
+                                   'provided / returned by .encode(config)'.format(self.ww.name))
+            
+            async def do_auth(out):
+                seq = cnxi.auth_seq(channel, i)
+                auth_required = deep_get(seq,'is_required',return2=None)
+                takes_input = deep_get(seq,'takes_input',return2=True)
+                via_url = deep_get(seq,'via_url')
+                each_time = deep_get(seq,'each_time')
+                send_separately = deep_get(seq,'send_separately')
+                set_authenticated = deep_get(seq,'set_authenticated',return2=True)
                 
-                if set_authenticated:
-                    cnxi.authenticated = True
+                tlogger0.debug(['({})'.format(i), params, is_private, auth_required, via_url,
+                                each_time, send_separately, '\n', takes_input, set_authenticated,
+                                cnxi.authenticated])
+            
+                if (is_private and auth_required is None or auth_required) and not via_url:
+                    _aInp = [out] if takes_input else []
+                    if each_time:
+                        out = self.ww.sign(*_aInp)
+                    elif not cnxi.authenticated:
+                        _aOut = self.ww.sign(*_aInp)
+                        if not send_separately: 
+                            out = _aOut
+                        else:
+                            await cnx.send(_aOut)
+                        
+                        if set_authenticated:
+                            cnxi.authenticated = True
+                        
+                return out
+            
+            if apply_to_packs is None or i in apply_to_packs:
+                out = await do_auth(out)
+            
+            await cnx.send(out)
+            
+            waiter = self.add_waiter(msg_id) if add_waiter else None
+            if not add_waiter:
+                return None
+            elif return_waiter:
+                return waiter
+            else:
+                _wait = wait if wait != 'default' else \
+                        self.ww.cis.get_value(channel, 'waiter_timeout', set='cnx')
+                        
+                try: return await self.wait_on_waiter(waiter, _wait)
+                finally: self.remove_waiter(waiter)
         
-        await cnx.send(out)
+        r = [await send_pack(i) for i in range(len(packs))]
         
-        waiter = self.add_waiter(id) if add_waiter else None
-        if not add_waiter:
-            return None
-        elif return_waiter:
-            return waiter
-        else:
-            if wait == 'default':
-                wait = self.ww.cis.get_value(channel, 'waiter_timeout', set='cnx')
-            try: return await self.wait_on_waiter(waiter, wait)
-            finally: self.remove_waiter(waiter)
+        return r[0] if single else r
             
             
     def forward_to_waiters(self, message_id, message, remove=True, copy=None):
@@ -423,10 +484,29 @@ class Transport:
     def _is_in_thread_loop(self):
         return asyncio.get_event_loop() is self._thread._loop
     
-    def stop(self):
-        for attr in ('recv_queue','send_queue','_event_queue'):
-            queue = getattr(self,attr)
-            call_via_loop(force_put, (queue, _quit_command), loop=queue._loop)
+    async def stop(self):
+        if 'stop' in self.futures:
+            return await self.futures['stop']
+        
+        self.futures['stop'] = asyncio.Future()
+        
+        try:
+            self.ww.cm.remove_all()
+            
+            if 'start' in self.futures:
+                for attr in ('recv_queue','send_queue','_event_queue'):
+                    queue = getattr(self,attr)
+                    call_via_loop(force_put, (queue, _quit_command), loop=queue._loop)
+                
+                try: await self.futures['start']
+                except Exception: pass
+        
+        finally:
+            if sys.exc_info()[1] is None:
+                self.futures['stop'].set_result(None)
+            else:
+                self.futures['stop'].set_exception(sys.exc_info()[1])
+            del self.futures['stop']
         
 
 class Request:

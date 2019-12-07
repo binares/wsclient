@@ -95,7 +95,8 @@ class ChannelsInfo:
                x: self.get_value(profile, x, set='cnx')
                 for x in ['signalr', 'hub_name', 'hub_methods', 
                           'reconnect_try_interval', 'connect_timeout', 'recv_timeout', 
-                          'rate_limit', 'ping_interval', 'poll_interval', 
+                          'ping_interval', 'ping_after', 'ping_as_message',
+                          'ping_timeout', 'poll_interval', 'rate_limit', 
                           'throttle_logging_level',]
             }, #queue_maxsizes = self.ww.queue_maxsizes,
                recv_queue = self.ww.tp.recv_queue, 
