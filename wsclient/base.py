@@ -51,33 +51,33 @@ class WSClient(metaclass=WSMeta):
     has = {}
     
     channel_defaults = {
-        #If channel's url is None, this will be used (may be a function):
-        # final_url = (url / url()).format(**self.url_compontents)
-        # (wrapped by .cis.wrap_url(url))
+        # If channel's url is None, this will be used (may be a function):
+        #  final_url = (url / url()).format(**self.url_compontents)
+        #  (wrapped by .cis.wrap_url(url))
         'url': None,
         'connection_profile': None,
-        #Whether or not .tp.send actually sends something to the cnx socket
+        # Whether or not .tp.send actually sends something to the cnx socket
         # (as opposed to just connecting)
         'send': True,
         'cnx_params_converter': None,
         'merge_option': False,
         'merge_limit': None, #>=2 for merge support
         'merge_index': None, #by default 1
-        #if False, .remove_subscription raises WSError on that channel
+        # if False, .remove_subscription raises WSError on that channel
         'unsub_option': True,
-        #Fetch necessary subscription related data shortly after 
+        # Fetch necessary subscription related data shortly after 
         # subscription becomes active
         'fetch_data_on_sub': True,
-        #To ensure that the user won't be using out-dated data
+        # To ensure that the user won't be using out-dated data
         # after unsubbing (unsub might also occur due to websocket crash)
         'delete_data_on_unsub': True,
-        #change it to 1 if subscription states are not updated by server
+        # change it to 1 if subscription states are not updated by server
         'default_subscription_state': 0,
-        #activate subscription when receives acknowledgement
-        #set to "on_cnx_activation" for the sub to be activated when its cnx is activated
+        # Activate subscription when receives acknowledgement.
+        # Set it to "on_cnx_activation" for the sub to be activated after its cnx is activated
         'auto_activate': True,
     }
-    #If "is_private" is set to True, .sign() is called on the specific output to server
+    # If "is_private" is set to True, .sign() is called on the specific output to server
 
     # {
     #    "channel": {
@@ -91,45 +91,45 @@ class WSClient(metaclass=WSMeta):
     max_total_subscriptions = None
     
     connection_defaults = {
-        #change hub_name and hub_methods only if signalr is set to True
+        # change hub_name and hub_methods only if signalr is set to True
         'signalr': False,
         'hub_name': None,
-        #it is necessary to list *all* methods to avoid KeyError
-        #during signalr_aio message handling
+        # it is necessary to list *all* methods to avoid KeyError
+        # during signalr_aio message handling
         'hub_methods': [],
         'connect_timeout': None,
         'reconnect_try_interval': 30,
-        #if current_time > last_message_recived_timestamp + recv_timeout,
-        #it assumes that the connection has been lost, and force crashes-reconnects
-        #the socket
+        # if current_time > last_message_recived_timestamp + recv_timeout,
+        # it assumes that the connection has been lost, and force crashes-reconnects
+        # the socket
         'recv_timeout': None, #seconds
-        #timeout for "send" response (if expected)
+        # timeout for "send" response (if expected)
         'waiter_timeout': 5,
-        #function that returns ping message to be sent to the socket
-        #if it is a method of subclass, can be given as 'm$method_name_here'
-        #if 'ping_as_message' == False, this may be left to None
+        # function that returns ping message to be sent to the socket
+        # if it is a method of subclass, can be given as 'm$method_name_here'
+        # if 'ping_as_message' == False, this may be left to None
         'ping': None,
-        #This must be overriden to activate the ping utility
+        # This must be overriden to activate the ping utility
         'ping_interval': None,
-        #if specified, ping ticker only sends the message if
-        #current_time > last_message_received_timestamp + ping_after
+        # if specified, ping ticker only sends the message if
+        # current_time > last_message_received_timestamp + ping_after
         'ping_after': None, #in seconds
-        #instead sending as raw bytes (via .ping of connection's socket)
-        #sends the ping as an ordinary message (json decodes and sends it)
+        # instead sending as raw bytes (via .ping of connection's socket)
+        # sends the ping as an ordinary message (json decodes and sends it)
         'ping_as_message': False,
-        #Only applies if 'ping_as_message' == False, force crashes-reconnects
-        #the socket if no pong frame is received within that time
+        # Only applies if 'ping_as_message' == False, force crashes-reconnects
+        # the socket if no pong frame is received within that time
         'ping_timeout': 5,
         'poll_interval': 0.05,
         'max_subscriptions': None,
-        #the interval between pushing (sending) individual subscriptions to the server
+        # the interval between pushing (sending) individual subscriptions to the server
         'subscription_push_rate_limit': None,
     }
     connection_profiles = {}
     
     url_components = {}
     
-    #since socket interpreter may clog due to high CPU usage,
+    # Since socket interpreter may clog due to high CPU usage,
     # maximum lengths for the queues are set, and if full,
     # previous items are removed one-by-one to make room for new ones
     queue_maxsizes = {
@@ -147,7 +147,33 @@ class WSClient(metaclass=WSMeta):
     }
     #e.g. "id" if response = {"id": x, ...}
     message_id_keyword = None
+    
+    # WSClient's subsclasses borrow __extend_attrs__ and __deepcopy_on__init__ from their parents,
+    # except the attrs that are prefixed with '-' (and plain '-' will omit all from parents)
+    # Example:
+    # ```
+    # class SubWSClient(WSClient):
+    #    auth_defaults = {'via_url': True}
+    #    connection_defaults = {'ping_interval': 2, 'something': 'some_value}
+    #    __extend_attrs__ = ['new_attr','-auth_defaults]
+    #    __deepcopy_on_init__ = ['new_attr_2']
+    #
+    # >>> SubWSClient.__deepcopy_on_init__ == ['new_attr_2'] + WSClient.__deepcopy_on_init__
+    # True
+    # >>> new_extend_attrs = ['new_attr'] + WSClient.__extend_attrs__
+    # >>> new_extend_attrs.remove('auth_defaults')
+    # >>> SubWSClient.__extend_attrs__ == new_extend_attrs
+    # True
+    # >>> new_connection_defaults = dict(WSClient.connection_defaults, ping_interval=2, something='some_value'}
+    # >>> SubWSClient.connection_defaults == new_connection_defaults
+    # True
+    # >>> SubWSClient.auth_defaults
+    # {'via_url': True}
 
+    # ```
+    # Now all SubWSClients attrs that are listed in its __extend_attrs__ will deep extend
+    # its parents corresponding attrs. And on __init__ all attrs listed in  __deepcopy_on__init
+    # will be deepcopied during SubWSClient.__init__ (and assigned to the resulting object)
     __extend_attrs__ = [
         'auth_defaults',
         'channel_defaults',
@@ -158,25 +184,20 @@ class WSClient(metaclass=WSMeta):
         'message_id_config',
         'queue_maxsizes',
         'url_components',
-        #'api_attr_limits',
-        #'orderbook_sends_bidAsk',
     ]
     __deepcopy_on_init__ = __extend_attrs__[:]
     
-    #To be initiated during the creation of the class,
-    # and in every subclass that has its own __properties__
-    #property_name, attr_name, getter_enabled(<bool>), setter_enabled, deleter_enabled
-    # (by default all 3 are True)
+    # To be initiated during the creation of the class, and in every subclass that has its own __properties__.
+    # :: property_name, attr_name, getter_enabled(<bool>), setter_enabled, deleter_enabled
+    #    (by default all 3 are True)
     __properties__ = [['channels_info','cis'],
                       ['connection_manager','cm'],
                       ['interpreter','ip'],
                       ['subscription_handler','sh'],
                       ['transport','tp'],]
     
-    #whether or not socket .recv and .send run on a thread or not
-    # (message handler runs on main thread)
-    #possibly useful to avoid handler slowing down .recv, which
-    # may cause some messages from the server to be missed
+    # Connection.recv and Connection.send run on on its own thread (message handler runs on main thread).
+    # Possibly useful to avoid handler slowing down .recv, which may cause some messages from the server to be missed.
     #sockets_per_thread = None
     
     name_registry = _WSCLIENT_NAMES

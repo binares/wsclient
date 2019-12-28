@@ -17,23 +17,56 @@ class ExtendAttrs(type):
     Deep updates attributes listed in __extend_attrs__, by copying the next attribute found in mro,
     and then "deep updates" it with the same attr of current class. 
     IMPORTANT: All these attributes are being deepcopied, i.e. all references to previous attrs 
-    and their (deep) values are lost."""
+    and their (deep) values are lost.
+    """
     def __new__(cls, name, bases, attrs):
         mro = _mro(*bases)
-        if '__extend_attrs__' in attrs:
-            to_extend = attrs['__extend_attrs__']
-        else:
-            to_extend = next((x.__extend_attrs__ for x in mro if hasattr(x,'__extend_attrs__')),[])
+        mro_included = (attrs,) + mro
+        extend_attrs = ExtendAttrs._join(mro_included, '__extend_attrs__')
         
-        for _ in to_extend:
-            try: nxt_value = next(getattr(x,_) for x in mro if hasattr(x,_))
+        for _ in extend_attrs:
+            try: nxt_value = next(getattr(x, _) for x in mro if hasattr(x, _))
             except StopIteration: continue
             if _ in attrs:
-                attrs[_] = deep_update(nxt_value,attrs[_],copy=True)
+                attrs[_] = deep_update(nxt_value, attrs[_], copy=True)
             else:
                 attrs[_] = _copy.deepcopy(nxt_value)
+        
+        if '__extend_attrs__' in attrs:
+            attrs['__extend_attrs__'] = extend_attrs
+        
+        if '__deepcopy_on_init__' in attrs:
+            deepcopy_on_init = ExtendAttrs._join(mro_included, '__deepcopy_on_init__')
+            attrs['__deepcopy_on_init__'] = deepcopy_on_init
        
         return super(ExtendAttrs, cls).__new__(cls, name, bases, attrs)
+    
+    
+    @staticmethod
+    def _join(mro, name='__extend_attrs__'):
+        """Adds all previous __extend_attrs__ together, and deducts all that start with '-'"""
+        extend_attrs = []
+        
+        for cls in reversed(mro):
+            cls_ea = cls.get(name) if isinstance(cls, dict) else getattr(cls, name, None)
+            if cls_ea is None:
+                continue
+            
+            if '-' in cls_ea:
+                extend_attrs = []
+            
+            deduct = [x for x in cls_ea if len(x)>1 and x[0]=='-']
+            add = [x for x in cls_ea if not x.startswith('-')]
+            
+            for attr in deduct:
+                try: extend_attrs.remove(attr[1:])
+                except ValueError: pass
+            
+            for attr in add:
+                if attr not in extend_attrs:
+                    extend_attrs.append(attr)
+                
+        return extend_attrs
 
 
 class CreateProperties(type):

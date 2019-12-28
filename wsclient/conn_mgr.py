@@ -3,6 +3,11 @@ from fons.event import Station
 
 from .conn import Connection
 
+# How to integrate both url and socket sub registration?
+# When unsubbing remove it from cnxi's url_factory, which
+# will then later .satisfies(sub), but return e.g. 'through_socket'
+# which will signal to .send() to proceed with the through-socket
+# procedure
 
 class ConnectionManager:
     def __init__(self, wrapper):
@@ -69,6 +74,11 @@ class ConnectionInfo:
                                (useful for reusing old connection for the exact same subscription,
                                 if the url directly provides stream (takes only one sub, enabled by connecting))"""
         channel = params['_']
+        #send = self.ww.cis.get_value(channel,'send',True)
+        #register_via = self.ww.cis.get_value(channel,'register_via','socket').lower()
+        #methods = register_via.split(' ')
+        #url_satisfied = True
+        #if 'url' in methods:
         if url_factory is None:
             url_factory = self.ww.cis.get_value(channel,'url_factory')
         if self.cnx.url != url_factory:

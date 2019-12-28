@@ -347,8 +347,8 @@ class Transport:
         single = (len(packs) == 1)
         
         is_private = self.ww.cis.get_value(channel,'is_private')
-        apply_to_packs = self.ww.cis.get_value(channel,'apply_to_packs')
-        
+        auth_seq = cnxi.auth_seq(channel)
+        apply_to_packs = deep_get(auth_seq, 'apply_to_packs')
         
         async def send_pack(i):
             pck = packs[i]

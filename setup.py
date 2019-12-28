@@ -5,8 +5,7 @@ setup(
    version='0.1.0',
    description='A framework for implementing websocket APIs',
    author='binares',
-   packages=find_packages(),
-   exclude=['test'],
+   packages=find_packages(exclude=['test']),
    python_requires='>=3.5',
    install_requires=[
        'websockets>=3.0',
