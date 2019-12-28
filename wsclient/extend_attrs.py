@@ -16,7 +16,8 @@ class ExtendAttrs(type):
     """
     Deep updates attributes listed in __extend_attrs__, by copying the next attribute found in mro,
     and then "deep updates" it with the same attr of current class. 
-    IMPORTANT: All these attributes are being deepcopied, i.e. all references to previous attrs 
+    IMPORTANT!
+    All these attributes are being deepcopied, i.e. all references to previous attrs 
     and their (deep) values are lost.
     """
     def __new__(cls, name, bases, attrs):
@@ -33,9 +34,13 @@ class ExtendAttrs(type):
                 attrs[_] = _copy.deepcopy(nxt_value)
         
         if '__extend_attrs__' in attrs:
+            # Save the original value
+            attrs['_{}__extend_attrs'.format(name)] = attrs['__extend_attrs__']
+            # Overwrite with new value
             attrs['__extend_attrs__'] = extend_attrs
         
         if '__deepcopy_on_init__' in attrs:
+            attrs['_{}__deepcopy_on_init'.format(name)] = attrs['__deepcopy_on_init__']
             deepcopy_on_init = ExtendAttrs._join(mro_included, '__deepcopy_on_init__')
             attrs['__deepcopy_on_init__'] = deepcopy_on_init
        
@@ -43,12 +48,15 @@ class ExtendAttrs(type):
     
     
     @staticmethod
-    def _join(mro, name='__extend_attrs__'):
+    def _join(bases, name='__extend_attrs__'):
         """Adds all previous __extend_attrs__ together, and deducts all that start with '-'"""
         extend_attrs = []
         
-        for cls in reversed(mro):
-            cls_ea = cls.get(name) if isinstance(cls, dict) else getattr(cls, name, None)
+        for cls in reversed(bases):
+            is_dict = isinstance(cls, dict)
+            _name = name if is_dict else '_{}{}'.format(cls.__name__, name[:-2])
+            cls_ea = cls.get(_name) if is_dict else getattr(cls, _name, None)
+            
             if cls_ea is None:
                 continue
             
