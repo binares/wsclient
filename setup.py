@@ -8,8 +8,8 @@ setup(
    packages=find_packages(exclude=['test']),
    python_requires='>=3.5',
    install_requires=[
-       'websockets>=3.0',
-       'signalr_client_aio>=0.0.1.6.2',
+       'requests>=2.18.4',
+       'websockets>=4.0.1',
        'fons @ git+https://github.com/binares/fons.git',
    ],
 )

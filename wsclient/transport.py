@@ -16,7 +16,7 @@ from .sub import Merged
 
 logger,logger2,tlogger,tloggers,tlogger0 = _log.get_standard_5(__name__)
 
-#Number of WSClient objects per thread. For infinite set to 0.
+# Number of WSClient objects per thread. For infinite set to 0.
 sockets_per_thread = 1
 threads = set()
 _quit_command = object()
@@ -25,11 +25,11 @@ _quit_command = object()
 class Transport:
     def __init__(self, wrapper):
         """:type wrapper: WSClient"""
-        self.ww = wrapper
+        self.wc = wrapper
             
-        #If param `_loop` was given in config, and a thread with such loop already exists,
+        # If param `_loop` was given in config, and a thread with such loop already exists,
         # share that thread
-        _loop = getattr(self.ww,'_loop',None)
+        _loop = getattr(self.wc,'_loop',None)
         thread = next((x for x in threads if _loop == x._loop),None)
         
         if thread is None:
@@ -46,33 +46,33 @@ class Transport:
             if _loop is None: 
                 _loop = asyncio.new_event_loop()
             self._thread = EliThread(target=_loop.run_forever, loop=_loop,
-                                     daemon=True, name='{}Thread'.format(self.ww.name))
+                                     daemon=True, name='{}Thread'.format(self.wc.name))
             self._thread.socket_count = 0
             threads.add(self._thread)
         
-        self.ww._loop = self._thread._loop
+        self.wc._loop = self._thread._loop
         
         #"_" beginning of an attr signifies that _thread._loop is used
-        self._event_queue = asyncio.Queue(0, loop=self.ww._loop)
-        self.recv_queue = asyncio.Queue(0, loop=self.ww.loop)
-        self.send_queue = asyncio.Queue(self.ww.queue_maxsizes.get('send',0), loop=self.ww.loop)
-        self._send_event = asyncio.Event(loop=self.ww._loop)
+        self._event_queue = asyncio.Queue(0, loop=self.wc._loop)
+        self.recv_queue = asyncio.Queue(0, loop=self.wc.loop)
+        self.send_queue = asyncio.Queue(self.wc.queue_maxsizes.get('send',0), loop=self.wc.loop)
+        self._send_event = asyncio.Event(loop=self.wc._loop)
         
-        self._event_queue.name = '{}[EQ]'.format(self.ww.name)
-        self.recv_queue.name = '{}[RQ]'.format(self.ww.name)
-        self.send_queue.name = '{}[SQ]'.format(self.ww.name)
+        self._event_queue.name = '{}[EQ]'.format(self.wc.name)
+        self.recv_queue.name = '{}[RQ]'.format(self.wc.name)
+        self.send_queue.name = '{}[SQ]'.format(self.wc.name)
         
         #These are the two main queues:
         # event : receives ConnectionEvent from all (active) connections
-        #         can also receive Event when evoking self.ww.broadcast_event(..)
-        #         can be listened on using self.ww.listen()
+        #         can also receive Event when evoking self.wc.broadcast_event(..)
+        #         can be listened on using self.wc.listen()
         # recv : receives websocket inputs (wrapped with Response) from all (active) connections
-        #        self.ww.handle receives from it
-        #For adding more queues, use self.ww.add_event_queue / self.ww.add_recv_queue
+        #        self.wc.handle receives from it
+        #For adding more queues, use self.wc.add_event_queue / self.wc.add_recv_queue
         #
         self.user_event_queue = ueq = \
-            asyncio.Queue(self.ww.queue_maxsizes.get('event',100), loop=self.ww.loop)
-        ueq.name = '{}[UEQ]'.format(self.ww.name)
+            asyncio.Queue(self.wc.queue_maxsizes.get('event',100), loop=self.wc.loop)
+        ueq.name = '{}[UEQ]'.format(self.wc.name)
         ueq.warn = False
         
         self.station = \
@@ -84,8 +84,8 @@ class Transport:
                      {'channel': 'active', 'id': 0, 'queue': False, 'event': None, 'loops': [0,-1]},
                      {'channel': 'inactive', 'id': 0, 'queue': False, 'event': None, 'loops': [0,-1]},],
                     default_queue_size = 100,
-                    loops = {0: self.ww.loop, -1: self.ww._loop},
-                    name = self.ww.name+'[Station]')
+                    loops = {0: self.wc.loop, -1: self.wc._loop},
+                    name = self.wc.name+'[Station]')
         
         self.station.broadcast('inactive')
         self.station.broadcast('stopped')
@@ -104,11 +104,11 @@ class Transport:
         self.futures['start'] = asyncio.Future()
         f1 = f2 = None
         try:
-            logger.debug("Starting '{}'".format(self.ww.name))
+            logger.debug("Starting '{}'".format(self.wc.name))
             self.station.broadcast('running')
             self.station.broadcast('stopped', op='clear')
     
-            (await self.ww.on_start()) if asyncio.iscoroutinefunction(self.ww.on_start) else self.ww.on_start()
+            (await self.wc.on_start()) if asyncio.iscoroutinefunction(self.wc.on_start) else self.wc.on_start()
     
             _loop = self._thread._loop
             f1 = call_via_loop(wrap_trylog(self._main), loop=_loop, module='asyncio')
@@ -136,17 +136,17 @@ class Transport:
         
         
     async def _main(self):
-        #This runs in self._thread
-        loop = self.ww.loop
+        # This runs in self._thread
+        loop = self.wc.loop
         _loop = asyncio.get_event_loop()
         
-        #.send() is rooted via .send_queue
+        # .send() is rooted via .send_queue
         async def _send(future,params,wait,id,cnx,sub):
             """:type future: asyncio.Future"""
             try: r = await self.send(params,wait,id,cnx,sub)
             except Exception as e:
                 tloggers.error('{} - Thread .send() error occurred: {}' \
-                               .format(self.ww.name, str(e)))
+                               .format(self.wc.name, str(e)))
                 loop.call_soon_threadsafe(
                     functools.partial(future.set_exception, e))
                 await asyncio.sleep(1)
@@ -154,18 +154,11 @@ class Transport:
             else: 
                 loop.call_soon_threadsafe(
                     functools.partial(future.set_result, r))
-                
-        def empty_queue(q):
-            items = []
-            while True:
-                try: items.append(q.get_nowait())
-                except asyncio.QueueEmpty: break
-            return items
         
-        #receives updates from the queue, sends them.
+        # receives updates from the queue, sends them.
         async def _fire_from_send_queue():
-            while not self.ww._closed:
-                #get from queue via the main loop
+            while not self.wc._closed:
+                # get from queue via the main loop
                 fut = call_via_loop(self.send_queue.get,
                                     module='asyncio',
                                     loop=loop,)
@@ -175,38 +168,45 @@ class Transport:
                 future,params,wait,id,cnx,sub = item
                 asyncio.ensure_future(
                     _send(future,params,wait,id,cnx,sub))
-        #Connections will be started when subscriptions are being pushed
-        # (in .send method)
-        await self.ww.sh.push_subscriptions()
+        
+        # Start firing right now (allow user initiated sending) before pushing
+        # the subs, as the .wc.handle method (which runs outside of the ._thread)
+        # might need to respond to some of the messages received during the pushing
+        fire = asyncio.ensure_future(_fire_from_send_queue())
         
         self.station.broadcast('active')
         self.station.broadcast('inactive', op='clear')
-        self.ww.broadcast_event('active', 1)
+        self.wc.broadcast_event('active', 1)
         
         try:
-            await _fire_from_send_queue()
+            # Connections will be started when subscriptions are being pushed
+            # (in .send method). Note that since this here is running in ._thread,
+            # the subscription out messages are NOT sent via the queue.
+            await self.wc.sh.push_subscriptions()
+            await fire
         finally:
+            fire.cancel()
             self.station.broadcast('active', op='clear')
             self.station.broadcast('inactive')
-            self.ww.broadcast_event('active', 0)
-            tlogger.debug('{} - stopped'.format(self.ww.name))
+            self.wc.broadcast_event('active', 0)
+            tlogger.debug('{} - stopped'.format(self.wc.name))
         
     
     async def process_responses(self):
-        #Process received results from connections. This runs in the main loop (self.loop)
-        tlogger.debug('{} - starting response processing'.format(self.ww.name))
-        iscoro = asyncio.iscoroutinefunction(self.ww.handle)
+        # Process received results from connections. This runs in the main loop (self.loop)
+        tlogger.debug('{} - starting response processing'.format(self.wc.name))
+        iscoro = asyncio.iscoroutinefunction(self.wc.handle)
         recv = None
         
-        while not self.ww._closed:
-            poll_interval = self.ww.connection_defaults['poll_interval']
+        while not self.wc._closed:
+            poll_interval = self.wc.connection_defaults['poll_interval']
             if recv is None:
                 recv = asyncio.ensure_future(self.recv_queue.get())
                 
             done,pending = await asyncio.wait([recv], timeout=poll_interval)
             if not recv.done():
                 self.station.broadcast('empty')
-                self.ww.broadcast_event('socket', 'empty')
+                self.wc.broadcast_event('socket', 'empty')
                 continue
             
             R = recv.result()
@@ -216,22 +216,22 @@ class Transport:
             
             try: 
                 if iscoro: 
-                    await self.ww.handle(R)
+                    await self.wc.handle(R)
                 else: 
-                    self.ww.handle(R)
+                    self.wc.handle(R)
             except Exception as e:
                 str_r = str(R.data)
                 dots = '...' if len(str_r) > 200 else ''
                 logger2.error('{} - {} while handling response: {}{}'.format(
-                    self.ww.name, e.__class__.__name__, str_r[:200], dots))
+                    self.wc.name, e.__class__.__name__, str_r[:200], dots))
                 logger.error(str_r)
                 logger.exception(e)
             else: 
-                message_id = self.ww.extract_message_id(R)
+                message_id = self.wc.extract_message_id(R)
                 if message_id is not None:
                     ftw = functools.partial(
                         self.forward_to_waiters, message_id, R, True)
-                    self.ww._loop.call_soon_threadsafe(
+                    self.wc._loop.call_soon_threadsafe(
                         functools.partial(trylog, ftw))
                 self.station.broadcast('recv')
 
@@ -240,37 +240,37 @@ class Transport:
     
     
     async def process_events(self):
-        #Process events from connections. This runs in self._thread
-        tlogger.debug('{} - starting event processing'.format(self.ww.name))
+        # Process events from connections. This runs in self._thread
+        tlogger.debug('{} - starting event processing'.format(self.wc.name))
         activation_count = defaultdict(int)
         
-        while not self.ww._closed:
+        while not self.wc._closed:
             e = await self._event_queue.get()
             if e is _quit_command:
                 break
             
-            try: cnx = self.ww.cm.connections[e.id]
+            try: cnx = self.wc.cm.connections[e.id]
             except KeyError: continue
             
             if e.type == 'socket' and e.data == 0:
-                for s in self.ww.sh.subscriptions:
+                for s in self.wc.sh.subscriptions:
                     if s.cnx is cnx:
-                        self.ww.sh.change_subscription_state(s, 0)
-                try: self.ww.cm.cnx_infs[cnx].authenticated = False
+                        self.wc.sh.change_subscription_state(s, 0)
+                try: self.wc.cm.cnx_infs[cnx].authenticated = False
                 except KeyError: pass
                         
             elif e.type == 'socket' and e.data == 1:
-                #Do not push on first notification,
+                # Do not push on first notification,
                 # as during that time *all* subscriptions are being pushed anyway
                 pushed = None
                 if activation_count[cnx]:
-                    pushed = await self.ww.sh.push_subscriptions(cnx)
+                    pushed = await self.wc.sh.push_subscriptions(cnx)
                     
-                for s in self.ww.sh.subscriptions:
+                for s in self.wc.sh.subscriptions:
                     if s.cnx is cnx:
-                        v = self.ww.cis.get_value(s.channel, 'auto_activate')
+                        v = self.wc.cis.get_value(s.channel, 'auto_activate')
                         if v == 'on_cnx_activation' and (pushed is None or s in pushed):
-                            self.ww.sh.change_subscription_state(s, 1)
+                            self.wc.sh.change_subscription_state(s, 1)
                         
                 activation_count[cnx] += 1
                 
@@ -299,9 +299,9 @@ class Transport:
              if subscription, True for subbing, False for unsubbing
         """
         if isinstance(params, dict) and cnx is None:
-            cnx = self.ww.sh.find_available_connection(params, create=True)
+            cnx = self.wc.sh.find_available_connection(params, create=True)
             
-        rq = Request(params, self.ww, cnx) if not isinstance(params, Request) else params
+        rq = Request(params, self.wc, cnx) if not isinstance(params, Request) else params
         
         #Forward to thread
         if not self._is_in_thread_loop():
@@ -312,20 +312,20 @@ class Transport:
         params = rq.params
         cnx = rq.cnx
         channel = rq.channel
-        cnxi = self.ww.cm.cnx_infs[cnx]
-        send = self.ww.cis.get_value(channel,'send',True)
+        cnxi = self.wc.cm.cnx_infs[cnx]
+        send = self.wc.cis.get_value(channel,'send',True)
         
         if not cnx.is_running() and sub is not False:
             try: cnx.start()
             except RuntimeError: pass
             await cnx.wait_till_active(cnx.connect_timeout)
         elif sub is False and not send:
-            #Due to param variance difference old connections would not satisfy
+            # Due to param variance difference old connections would not satisfy
             # the new variance, and would remain unused
-            #if rq.is_merger() and not any(_s.merger is not rq and _s.cnx is cnx
-            #                              for _s in self.ww.sh.subscriptions):
-            if not send and not any(cnx is _s.cnx for _s in self.ww.sh.subscriptions):
-                self.ww.cm.remove_connection(cnx, True)
+            # if rq.is_merger() and not any(_s.merger is not rq and _s.cnx is cnx
+            #                               for _s in self.wc.sh.subscriptions):
+            if not send and not any(cnx is _s.cnx for _s in self.wc.sh.subscriptions):
+                self.wc.cm.remove_connection(cnx, True)
             if cnx.is_running():
                 await cnx.stop()
         
@@ -341,12 +341,12 @@ class Transport:
             f.set_result(None)
             return f
         
-        packs = self.ww.encode(rq, sub)
+        packs = self.wc.encode(rq, sub)
         if not isinstance(packs, Merged):
             packs = [packs]
         single = (len(packs) == 1)
         
-        is_private = self.ww.cis.get_value(channel,'is_private')
+        is_private = self.wc.cis.get_value(channel,'is_private')
         auth_seq = cnxi.auth_seq(channel)
         apply_to_packs = deep_get(auth_seq, 'apply_to_packs')
         
@@ -363,7 +363,7 @@ class Transport:
 
             if add_waiter and msg_id is None:
                 raise RuntimeError('{} - waiter requested but "message_id" was not ' \
-                                   'provided / returned by .encode(config)'.format(self.ww.name))
+                                   'provided / returned by .encode(config)'.format(self.wc.name))
             
             async def do_auth(out):
                 seq = cnxi.auth_seq(channel, i)
@@ -381,9 +381,9 @@ class Transport:
                 if (is_private and auth_required is None or auth_required) and not via_url:
                     _aInp = [out] if takes_input else []
                     if each_time:
-                        out = self.ww.sign(*_aInp)
+                        out = self.wc.sign(*_aInp)
                     elif not cnxi.authenticated:
-                        _aOut = self.ww.sign(*_aInp)
+                        _aOut = self.wc.sign(*_aInp)
                         if not send_separately: 
                             out = _aOut
                         else:
@@ -406,12 +406,14 @@ class Transport:
                 return waiter
             else:
                 _wait = wait if wait != 'default' else \
-                        self.ww.cis.get_value(channel, 'waiter_timeout', set='cnx')
+                        self.wc.cis.get_value(channel, 'waiter_timeout', set='cnx')
                         
                 try: return await self.wait_on_waiter(waiter, _wait)
                 finally: self.remove_waiter(waiter)
         
-        r = [await send_pack(i) for i in range(len(packs))]
+        r = []
+        for i in range(len(packs)):
+            r.append(await send_pack(i))
         
         return r[0] if single else r
             
@@ -425,13 +427,12 @@ class Transport:
             try: waiter.set_result(message)
             except asyncio.InvalidStateError:
                 logger.error('{} - "{}"\'s waiter #{} result has already been set'.format(
-                    self.ww.name, message_id, i))
+                    self.wc.name, message_id, i))
         if remove:
             del self.waiters[message_id]
             
             
     def add_waiter(self, message_id):
-        #TODO: Should this be threadsafe?
         waiter = asyncio.Future()
         waiter.message_id = message_id
         try: l = self.waiters[message_id]
@@ -453,31 +454,31 @@ class Transport:
     
     async def wait_on_waiter(self, waiter, timeout='default'):
         if timeout == 'default':
-            timeout = self.ww.connection_defaults['waiter_timeout']
+            timeout = self.wc.connection_defaults['waiter_timeout']
         tlogger.debug('{} - waiting on waiter {}, timeout: {}'.format(
-            self.ww.name, waiter.message_id, timeout))
+            self.wc.name, waiter.message_id, timeout))
         try: r = await asyncio.wait_for(waiter, timeout)
         except asyncio.TimeoutError as e:
             tloggers.error('{} - timeout occurred on waiter {}'.format(
-                self.ww.name, waiter.message_id))
+                self.wc.name, waiter.message_id))
             raise e
-        tlogger.debug('{} - {} wait finished'.format(self.ww.name, waiter.message_id))
+        tlogger.debug('{} - {} wait finished'.format(self.wc.name, waiter.message_id))
         return r
 
 
     def add_queue(self, channel, id=None, queue=None, maxsize=None, loop='out'):
         loops = ([loop] if loop!='out' else self.loop) if loop is not None else asyncio.get_event_loop()
         if maxsize is None:
-            maxsize = self.ww.queue_maxsizes.get(channel, 0)
-        #for cnx in self.ww.cm.connections.values():
-        #    cnx.add_queue(channel, id, queue, maxsize, loops)
+            maxsize = self.wc.queue_maxsizes.get(channel, 0)
+        # for cnx in self.wc.cm.connections.values():
+        #     cnx.add_queue(channel, id, queue, maxsize, loops)
         return self.station.add_queue(channel, id, queue, maxsize, loops)
     
     def remove_queue(self, channel, queue_or_id, loop='out'):
         id = queue_or_id if not isinstance(queue_or_id,asyncio.Event) else queue_or_id.id
         loops = ([loop] if loop!='out' else self.loop) if loop is not None else asyncio.get_event_loop()
-        #for cnx in self.ww.cm.connections.values():
-        #    cnx.remove(channel, id, loops)
+        # for cnx in self.wc.cm.connections.values():
+        #     cnx.remove(channel, id, loops)
         return self.station.remove(channel, id, loops)
     
     
@@ -491,7 +492,7 @@ class Transport:
         self.futures['stop'] = asyncio.Future()
         
         try:
-            self.ww.cm.remove_all()
+            self.wc.cm.remove_all()
             
             if 'start' in self.futures:
                 for attr in ('recv_queue','send_queue','_event_queue'):
@@ -513,15 +514,15 @@ class Request:
     def __init__(self, params, wrapper, cnx=None):
         """:type wrapper: WSClient
            :type cnx: Connection"""
-        self.ww = wrapper
+        self.wc = wrapper
         self.cnx = cnx
         self.params = params.copy()
-        self.id_tuple = self.ww.cis.create_id_tuple(params)
+        self.id_tuple = self.wc.cis.create_id_tuple(params)
         self.channel = self.id_tuple[0]
         self.merger = None
         
     def push(self):
-        return asyncio.ensure_future(self.ww.tp.send(self))
+        return asyncio.ensure_future(self.wc.tp.send(self))
     
     def is_merged(self):
         return self.merger is not None

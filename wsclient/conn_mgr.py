@@ -12,17 +12,17 @@ from .conn import Connection
 class ConnectionManager:
     def __init__(self, wrapper):
         """:type wrapper: WSClient"""
-        self.ww = wrapper
+        self.wc = wrapper
         self.connections = {}
         self.cnx_infs = {}
         self.station = Station([{'channel': 'all_active', 'id': 0, 'queue': False}],
-                               loops=[self.ww.loop],
-                               name=self.ww.name+'[CM][Station]')
+                               loops=[self.wc.loop],
+                               name=self.wc.name+'[CM][Station]')
     
     def add_connection(self, config, start=False):
         cnx = Connection(**config)
         self.connections[cnx.id] = cnx
-        self.cnx_infs[cnx] = ConnectionInfo(self.ww, cnx)
+        self.cnx_infs[cnx] = ConnectionInfo(self.wc, cnx)
         if start:
             cnx.start()
         return cnx
@@ -58,13 +58,13 @@ class ConnectionManager:
             
             
 class ConnectionInfo:
-    def __init__(self, ww, cnx):
-        """:type ww: WSClient
+    def __init__(self, wc, cnx):
+        """:type wc: WSClient
            :type cnx: Connection"""
-        self.ww = ww
+        self.wc = wc
         self.cnx = cnx
-        self.max_subscriptions = (self.ww.sh.max_subs_per_socket 
-                                    if self.ww.sh.max_subs_per_socket is not None else 
+        self.max_subscriptions = (self.wc.sh.max_subs_per_socket 
+                                    if self.wc.sh.max_subs_per_socket is not None else 
                                   100*1000)
         self.authenticated = False
         
@@ -74,13 +74,13 @@ class ConnectionInfo:
                                (useful for reusing old connection for the exact same subscription,
                                 if the url directly provides stream (takes only one sub, enabled by connecting))"""
         channel = params['_']
-        #send = self.ww.cis.get_value(channel,'send',True)
-        #register_via = self.ww.cis.get_value(channel,'register_via','socket').lower()
+        #send = self.wc.cis.get_value(channel,'send',True)
+        #register_via = self.wc.cis.get_value(channel,'register_via','socket').lower()
         #methods = register_via.split(' ')
         #url_satisfied = True
         #if 'url' in methods:
         if url_factory is None:
-            url_factory = self.ww.cis.get_value(channel,'url_factory')
+            url_factory = self.wc.cis.get_value(channel,'url_factory')
         if self.cnx.url != url_factory:
             return False
         auth_satisfied = self.auth_satisfied(channel)
@@ -89,7 +89,7 @@ class ConnectionInfo:
         return True
         
     def auth_satisfied(self, channel):
-        is_private = self.ww.cis.get_value(channel,'is_private')
+        is_private = self.wc.cis.get_value(channel,'is_private')
         seq = self.auth_seq(channel)
         auth_required = deep_get(seq,'required',return2=None)
         if (not is_private and auth_required is None) or \
@@ -110,8 +110,8 @@ class ConnectionInfo:
         pass
     
     def auth_seq(self, channel, i=None):
-        auth = self.ww.cis.get_value(channel,'auth',{})
-        defaults = self.ww.auth_defaults
+        auth = self.wc.cis.get_value(channel,'auth',{})
+        defaults = self.wc.auth_defaults
         if i is None:
             return [auth, defaults]
         else:
@@ -128,7 +128,7 @@ class ConnectionInfo:
         return self.cnx
     @property
     def sub_count(self):
-        return sum(s.cnx is self.cnx for s in self.ww.sh.subscriptions)
+        return sum(s.cnx is self.cnx for s in self.wc.sh.subscriptions)
     @property
     def free_subscription_slots(self):
         return self.max_subscriptions - self.sub_count

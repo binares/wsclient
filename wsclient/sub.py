@@ -21,7 +21,7 @@ class SubscriptionHandler:
                  max_connections=None, max_subscriptions=None, max_subs_per_socket=None,
                  subscription_push_rate_limit=None):
         """:type wrapper: WSClient"""
-        self.ww = wrapper
+        self.wc = wrapper
         self.max_connections = max_connections
         self.max_subscriptions = max_subscriptions
         self.max_subs_per_socket = max_subs_per_socket
@@ -35,7 +35,7 @@ class SubscriptionHandler:
 
     async def push_subscriptions(self, cnx=None):
         cnx_id = cnx.id if cnx is not None else 'null'
-        tlogger.debug('{} - pushing cnx <{}> subscriptions'.format(self.ww.name, cnx_id))
+        tlogger.debug('{} - pushing cnx <{}> subscriptions'.format(self.wc.name, cnx_id))
         mergers = set()
         pushed = []
         
@@ -47,15 +47,15 @@ class SubscriptionHandler:
                     continue
                 mergers.add(s.merger)
                 s = s.merger
-            tlogger0.debug('{} - pushing {} to cnx <{}>'.format(self.ww.name, s, s.cnx.id))
+            tlogger0.debug('{} - pushing {} to cnx <{}>'.format(self.wc.name, s, s.cnx.id))
             try: await s.push()
             except Exception as e:
-                logger2.error('{} - could not push {} to cnx <{}>'.format(self.ww.name, s, s.cnx.id))
+                logger2.error('{} - could not push {} to cnx <{}>'.format(self.wc.name, s, s.cnx.id))
                 logger.exception(e)
             else: pushed.append(s)
             if self.subscription_push_rate_limit is not None:
                 await asyncio.sleep(self.subscription_push_rate_limit)
-        tlogger.debug('{} - subscriptions pushed'.format(self.ww.name))
+        tlogger.debug('{} - subscriptions pushed'.format(self.wc.name))
         
         return pushed
         
@@ -63,36 +63,36 @@ class SubscriptionHandler:
     def add_subscription(self, params):
         """:param params: dict or id_tuple"""
         if hasattr(params, '__iter__') and not isinstance(params, dict):
-            params = self.ww.cis.parse_id_tuple(params)
+            params = self.wc.cis.parse_id_tuple(params)
         channel = params['_']
-        self.ww.cis.verify_has(channel)
-        self.ww.cis.verify_input(params)
-        id_tuple = self.ww.cis.create_id_tuple(params)
+        self.wc.cis.verify_has(channel)
+        self.wc.cis.verify_input(params)
+        id_tuple = self.wc.cis.create_id_tuple(params)
         merge = False
         
-        if self.ww.cis.has_merge_option(channel):
-            merge_index = self.ww.cis.get_value(channel, 'merge_index')
+        if self.wc.cis.has_merge_option(channel):
+            merge_index = self.wc.cis.get_value(channel, 'merge_index')
             if merge_index is None: merge_index = 1
             #elif merge_index <= 1: raise ValueError(merge_index)
             if isinstance(id_tuple[merge_index], Merged):
                 merge = True
         elif any(isinstance(x, Merged) for x in id_tuple): 
             raise ValueError("{} - channel '{}' doesn't accept merged params; got: {}".format(
-                              self.ww.name, channel, params))
+                              self.wc.name, channel, params))
         
         count = 1
-        merge_limit = self.ww.cis.get_merge_limit(channel)
+        merge_limit = self.wc.cis.get_merge_limit(channel)
         
         if merge:
             params_list = []
-            identifiers = self.ww.cis._fetch_subscription_identifiers(channel)
+            identifiers = self.wc.cis._fetch_subscription_identifiers(channel)
             p_name = identifiers[merge_index]
             count = len(params[p_name])
             if not len(params[p_name]):
-                raise ValueError("{} - got empty merged param: '{}'".format(self.ww.name, p_name))
+                raise ValueError("{} - got empty merged param: '{}'".format(self.wc.name, p_name))
             elif merge_limit is not None and count > merge_limit:
                 raise ValueError("{} - param '{}' count > merge_limit [{} > {}]".format(
-                                  self.ww.name, p_name, count, merge_limit))
+                                  self.wc.name, p_name, count, merge_limit))
             for p_value in params[p_name]:
                 new = _copy.deepcopy(params)
                 new[p_name] = p_value
@@ -106,8 +106,8 @@ class SubscriptionHandler:
     
         for _params in params_list:
             if self.is_subscribed_to(_params):
-                _id_t = self.ww.cis.create_id_tuple(_params)
-                tlogger0.debug('{} - already subbed to: {}'.format(self.ww.name, _id_t))
+                _id_t = self.wc.cis.create_id_tuple(_params)
+                tlogger0.debug('{} - already subbed to: {}'.format(self.wc.name, _id_t))
             else:
                 not_subbed.append(_params)
                 
@@ -121,24 +121,24 @@ class SubscriptionHandler:
         merge = count > 1
         if merge:
             new_params = _copy.deepcopy(params)
-            new_params[p_name] = self.ww.merge([x[p_name] for x in not_subbed])
+            new_params[p_name] = self.wc.merge([x[p_name] for x in not_subbed])
         else:
             new_params = not_subbed[0]
         
         cnx = self.find_available_connection(new_params, create=True, count=count)
-        tlogger0.debug('{} - {} available cnx <{}>'.format(self.ww.name, params, cnx.id))
+        tlogger0.debug('{} - {} available cnx <{}>'.format(self.wc.name, params, cnx.id))
         subs = [] 
         
         for i,_params in enumerate(not_subbed):
-            s = Subscription(_params, self.ww, cnx)
+            s = Subscription(_params, self.wc, cnx)
             self.subscriptions.append(s)
             subs.append(s)
         
         if merge:
-            s = SubscriptionMerger(channel, self.ww, cnx, subs)
+            s = SubscriptionMerger(channel, self.wc, cnx, subs)
             
-        if self.ww.tp._thread.isAlive() and self.ww.is_active():
-            tlogger0.debug('{} - ensuring sub {} push future.'.format(self.ww.name, s.id_tuple))
+        if self.wc.tp._thread.isAlive() and self.wc.is_active():
+            tlogger0.debug('{} - ensuring sub {} push future.'.format(self.wc.name, s.id_tuple))
             return s.push()
         
         return True
@@ -148,12 +148,12 @@ class SubscriptionHandler:
         """:param x: dict, id_tuple, uid, Request, Subscription, SubscriptionMerger"""
         #For removing merged subscription, pass SubscriptionMerger instance
         if hasattr(x, '__iter__') and not isinstance(x, (dict,str,Request)):
-            x = self.ww.cis.parse_id_tuple(x)
+            x = self.wc.cis.parse_id_tuple(x)
             
         if isinstance(x, dict):
             channel = x['_']
-            self.ww.cis.verify_has(channel)
-            self.ww.cis.verify_input(x)
+            self.wc.cis.verify_has(channel)
+            self.wc.cis.verify_input(x)
         
         if not self.is_subscribed_to(x):
             return None
@@ -162,10 +162,10 @@ class SubscriptionHandler:
         
         if getattr(s,'merger',None) is not None:
             raise SubscriptionError("{} - '{}' cannot be removed because it has merger attached to it.".format(
-                                    self.ww.name, s.id_tuple))
-        if not self.ww.cis.has_unsub_option(s.channel):
+                                    self.wc.name, s.id_tuple))
+        if not self.wc.cis.has_unsub_option(s.channel):
             raise SubscriptionError("{} - '{}' doesn't support unsubscribing.".format(
-                                    self.ww.name, s.channel))
+                                    self.wc.name, s.channel))
 
         self.release_uid(s.uid)
         if s.is_merger():
@@ -178,18 +178,18 @@ class SubscriptionHandler:
             except StopIteration: continue
             else: del self.subscriptions[s_index]
 
-        if self.ww.is_active():
+        if self.wc.is_active():
             return s.unsub()
         
         #If no "send" is deployed on cnx, and cnx would NOT be deleted 
         # (after *compulsory* stopping in "no send" case, as that is the only way to stop its feed),
         # re-subscribing on the old cnx could cause delay due to the old's "stop" future not having completed yet
         #Thus to guarantee the fluency it's better to delete the cnx entirely
-        send = self.ww.cis.get_value(s.channel,'send',True)
+        send = self.wc.cis.get_value(s.channel,'send',True)
         #Cnx with param variance probably can't be reused
         #if s.is_merger() and not any(s.cnx is _s.cnx for _s in self.subscriptions):
         if not send and not any(s.cnx is _s.cnx for _s in self.subscriptions):
-            self.ww.cm.remove_connection(s.cnx, delete=True)
+            self.wc.cm.remove_connection(s.cnx, delete=True)
         
         return True
     
@@ -203,16 +203,16 @@ class SubscriptionHandler:
         
     def find_available_connection(self, params, create=False, count=1):
         channel = params['_']
-        is_sub = self.ww.cis.is_subscription(channel)
+        is_sub = self.wc.cis.is_subscription(channel)
         free_slots = self.get_total_free_subscription_slots()
         if is_sub and free_slots is not None and count > free_slots:
             raise SubscriptionError
         
         cnx = None
-        cfg = self.ww.cis.fetch_connection_config(channel, params)
+        cfg = self.wc.cis.fetch_connection_config(channel, params)
         url_factory = cfg['url']
         
-        for _cnx,_cnxi in self.ww.cm.cnx_infs.items():
+        for _cnx,_cnxi in self.wc.cm.cnx_infs.items():
             if is_sub:
                 free_slots = _cnxi.free_subscription_slots
                 if free_slots is not None and free_slots < count:
@@ -231,9 +231,9 @@ class SubscriptionHandler:
     def create_connection(self, params, cfg=None):
         if cfg is None:
             channel = params['_']
-            cfg = self.ww.cis.fetch_connection_config(channel, params)
+            cfg = self.wc.cis.fetch_connection_config(channel, params)
         #cnx = Connection(**cfg)
-        cnx = self.ww.cm.add_connection(cfg)
+        cnx = self.wc.cm.add_connection(cfg)
         return cnx
         
         
@@ -255,14 +255,14 @@ class SubscriptionHandler:
         
     def handle_subscription_ack(self, message_id):
         #print(r)
-        uid,status = self.ww.ip.decode_message_id(message_id)
+        uid,status = self.wc.ip.decode_message_id(message_id)
         if uid is None:
             return
         try: s = self.get_subscription(uid)
         except ValueError: 
-            logger.warn("{} - uid doesn't exist: {}".format(self.ww.name, uid))
+            logger.warn("{} - uid doesn't exist: {}".format(self.wc.name, uid))
             return
-        auto_activate = self.ww.cis.get_value(s.channel, 'auto_activate')
+        auto_activate = self.wc.cis.get_value(s.channel, 'auto_activate')
         if status and auto_activate != 'on_cnx_activation' and auto_activate:
             self.change_subscription_state(uid, 1)
         elif not status:
@@ -282,18 +282,18 @@ class SubscriptionHandler:
         s.state = state
         
         if state != prev_state:
-            tlogger0.debug('{} - {}'.format(self.ww.name, s))
+            tlogger0.debug('{} - {}'.format(self.wc.name, s))
         
         def data_ops(s):
             #Fetch necessary data before enabling subscription
-            if state and self.ww.cis.has_fetch_data_on_sub_requirement(s.channel):
-                self.ww.loop.call_soon_threadsafe(functools.partial(
-                    self.ww.fetch_data, s, prev_state))
+            if state and self.wc.cis.has_fetch_data_on_sub_requirement(s.channel):
+                self.wc.loop.call_soon_threadsafe(functools.partial(
+                    self.wc.fetch_data, s, prev_state))
             #To make it absolutely sure that the user won't be
             # using out-dated data
-            if not state and self.ww.cis.has_delete_data_on_unsub_requirement(s.channel):
-                self.ww.loop.call_soon_threadsafe(functools.partial(
-                    self.ww.delete_data, s, prev_state))
+            if not state and self.wc.cis.has_delete_data_on_unsub_requirement(s.channel):
+                self.wc.loop.call_soon_threadsafe(functools.partial(
+                    self.wc.delete_data, s, prev_state))
                 
         subs = [s] if not s.is_merger() else s.subscriptions
         for _s in subs:
@@ -316,7 +316,7 @@ class SubscriptionHandler:
             return x
         if isinstance(x, Request):
             x = x.id_tuple
-        id_tuple = self.ww.cis.get_subscription_id_tuple(x)
+        id_tuple = self.wc.cis.get_subscription_id_tuple(x)
         
         s = next((_s for _s in self.subscriptions if _s.id_tuple == id_tuple), None)
         if s is None:
@@ -335,7 +335,7 @@ class SubscriptionHandler:
     
     @property
     def ip(self):
-        return self.ww.ip
+        return self.wc.ip
     
     
 class Subscription(Request):
@@ -344,17 +344,17 @@ class Subscription(Request):
            :type cnx: Connection"""
         super().__init__(params, wrapper, cnx)
         
-        self.uid = self.ww.sh.create_uid()
+        self.uid = self.wc.sh.create_uid()
         self.station = Station( [{'channel': 'active', 'id': 0, 'queue': False, 'loops': [0,-1]},
                                  {'channel': 'inactive', 'id': 0, 'queue': False, 'loops': [0,-1]}],
-                                loops={-1: self.ww._loop, 
-                                        0: self.ww.loop})
-        self.state = self.ww.cis.get_default_subscription_state(self.channel)
+                                loops={-1: self.wc._loop, 
+                                        0: self.wc.loop})
+        self.state = self.wc.cis.get_default_subscription_state(self.channel)
         
     def add_merger(self, merger):
         if self.is_active():
             raise RuntimeError("{} - {} merger can't be added while sub is active".format(
-                                self.ww.name, self.id_tuple))
+                                self.wc.name, self.id_tuple))
         merger.add(self)
         
     def remove_merger(self, merger):
@@ -363,12 +363,12 @@ class Subscription(Request):
     def push(self):
         if self.merger is not None:
             return self.merger.push()
-        return asyncio.ensure_future(self.ww.tp.send(self, sub=True))
+        return asyncio.ensure_future(self.wc.tp.send(self, sub=True))
         
     def unsub(self):
         if self.merger is not None:
             return self.merger.unsub(self)
-        return asyncio.ensure_future(self.ww.tp.send(self, sub=False))
+        return asyncio.ensure_future(self.wc.tp.send(self, sub=False))
         
     def is_active(self):
         return self.station.get_event('active', 0, loop=0).is_set()
@@ -429,7 +429,7 @@ class SubscriptionMerger(Subscription):
             self.add(s)
         
     def add(self, s):
-        if s.ww is not self.ww:
+        if s.wc is not self.wc:
             raise ValueError('Subscription has different WSClient attached')
         elif s.channel != self.channel:
             raise ValueError('Subscription has different channel attached - {}'.format(s.channel))

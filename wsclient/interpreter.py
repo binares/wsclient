@@ -4,10 +4,10 @@ class Interpreter:
     #Generate / decode message ids
     def __init__(self, wrapper):
         """:type wrapper: WSClient"""
-        self.ww = wrapper
+        self.wc = wrapper
     
     def generate_message_id(self, uid, unsubscribe=False):
-        c = self.ww.message_id_config
+        c = self.wc.message_id_config
         kw = {x:y for x,y in c.items() if x in ('uppers','lowers')}
         #if not c['numbers']: kw['set'] = 'alpha'
         as_int = c['type'] in ('int',int)
@@ -52,5 +52,5 @@ class Interpreter:
                 var = var[2:]
             elif var.startswith('$'):
                 var = var[1:]
-            var = getattr(self.ww, var)
+            var = getattr(self.wc, var)
         return var

@@ -1,5 +1,5 @@
 import websockets
-import signalr_aio
+import signalr_aio_wsclient as signalr_aio
 import sys
 import json
 import asyncio
@@ -170,7 +170,7 @@ class Connection:
         self.conn.received += put_to_recv_queue
         self.conn.start()
         await asyncio.sleep(0.1)
-        signalr_fut = self.conn._Connection__transport.futures[0]
+        signalr_fut = self.conn._Connection__transport._conn_handler
         
         async def wait_on_signalr_future():
             try:
@@ -343,16 +343,16 @@ class Connection:
             r = r.data
         return r
         
-    def send(self, message):
-        return asyncio.ensure_future(self._send(message), loop=self.loop)
+    def send(self, message, dump=True):
+        return call_via_loop_afut(self._send, (message, dump), loop=self.loop)
     
-    async def _send(self, message):
+    async def _send(self, message, dump=True):
         await self.throttle()
         await self.wait_till_active(self.connect_timeout)
-        #TODO: erase the following line
-        print('{} - sending: {}'.format(self.name, message))
+        tlogger.debug('{} - sending: {}'.format(self.name, message))
         if not self.signalr:
-            await self.socket.send(json.dumps(message))
+            send_msg = json.dumps(message) if dump else message
+            await self.socket.send(send_msg)
         else:
             self.hub.server.invoke(*message)
     

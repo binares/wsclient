@@ -249,7 +249,7 @@ class WSClient(metaclass=WSMeta):
         
     def start(self):
         if self._closed:
-            raise TerminatedException("'{}' is closed".format(self.ww.name))
+            raise TerminatedException("'{}' is closed".format(self.name))
         
         if asyncio.get_event_loop() is self.loop:
             return asyncio.ensure_future(self.tp.start())
@@ -258,7 +258,8 @@ class WSClient(metaclass=WSMeta):
     
     
     def on_start(self):
-        """Overwrite this method. May be asynchronous."""
+        """Overwrite this method. May be asynchronous.
+           Is executed as the first thing when .start() is awaited on."""
     
     
     def send(self, params, wait=False, id=None, cnx=None, sub=None):
@@ -345,9 +346,16 @@ class WSClient(metaclass=WSMeta):
         # ("active" isn't related to cnx-s, but whether or not WSClient has pushed its subscriptions
         #   and is ready to accept from send queue)
         await asyncio.wait_for(self.tp.station.get_queue(channel, queue_id).wait(), timeout)
-        
+    
+    
+    def is_running(self):
+        """Set when .start() is awaited on. Cleared when .start() finishes."""
+        return self.tp.station.get_event('running', 0, loop=0).is_set()
+    
         
     def is_active(self):
+        """Set after send queue starts firing. Cleared when the firing stops.
+           I.e .is_active()==True means that .send method is currently usable."""
         return self.tp.station.get_event('active', 0, loop=0).is_set()
     
     

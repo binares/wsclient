@@ -6,7 +6,7 @@ class URLFactory:
     def __init__(self, wrapper, url_notation, params=None):
         """:type wrapper: WSClient
            :type url_notation: str"""
-        self.ww = wrapper
+        self.wc = wrapper
         self.notation = url_notation
         self.params = params
         
@@ -26,13 +26,13 @@ class URLFactory:
             elif type in ('variable',):
                 resolved = params[name]
             elif type == 'component':
-                cmp = self.ww.url_components[name]
+                cmp = self.wc.url_components[name]
                 if hasattr(cmp,'__call__'):
                     args = [self] if get_arg_count(cmp) else []
                     cmp = (await cmp(*args)) if asyncio.iscoroutinefunction(cmp) else cmp(*args)
                 resolved = cmp
             elif type in ('method', 'method:shared'):
-                method = getattr(self.ww, name)
+                method = getattr(self.wc, name)
                 args = [self] if get_arg_count(method) else []
                 resolved = (await method(*args)) if asyncio.iscoroutinefunction(method) else method(*args)
             else:
@@ -84,7 +84,7 @@ class URLFactory:
     def copy(self, params=None):
         if params is None:
             params = self.params
-        return self.__class__(self.ww, self.notation, params)
+        return self.__class__(self.wc, self.notation, params)
     
     
     def __eq__(self, other):
@@ -101,7 +101,7 @@ class URLFactory:
             for name,type in zip(obj.names, obj.types):
                 if type in ('method', 'variable'):
                     return False
-                elif type == 'component' and not isinstance(self.ww.url_components[name], str):
+                elif type == 'component' and not isinstance(self.wc.url_components[name], str):
                     return False
                 
         return True

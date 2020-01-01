@@ -4,7 +4,7 @@ from fons.dict_ops import deep_get
 class ChannelsInfo:
     def __init__(self, wrapper):
         """:type wrapper: WSClient"""
-        self.ww = wrapper
+        self.wc = wrapper
         
     def create_id_tuple(self, params):
         id_kwargs = self._fetch_subscription_identifiers(params['_'])
@@ -26,7 +26,7 @@ class ChannelsInfo:
     
     def _get_subscription_id_tuple_by_uid(self, uid):
         try: 
-            return next(s.id_tuple for s in self.ww.sh.subscriptions
+            return next(s.id_tuple for s in self.wc.sh.subscriptions
                          if s.uid == uid)
         except StopIteration:
             raise ValueError('Unregistered uid: {}'.format(uid))
@@ -41,7 +41,7 @@ class ChannelsInfo:
     
     def verify_has(self, channel, *args, throw=True):
         keys = (channel,) + args
-        cur = self.ww.has
+        cur = self.wc.has
         for i,key in enumerate(keys):
             if hasattr(key,'__iter__') and not isinstance(key,str):
                 key_list = key
@@ -85,7 +85,7 @@ class ChannelsInfo:
             if var is None: continue
             if isinstance(var, str) or not hasattr(var, '__iter__'):
                 var = [var]
-            var = [self.ww.ip.interpret_variable(v) for v in var]
+            var = [self.wc.ip.interpret_variable(v) for v in var]
             funcs[name] = var if name != 'ping' else var[0]
             
         return dict(
@@ -98,12 +98,12 @@ class ChannelsInfo:
                           'ping_interval', 'ping_after', 'ping_as_message',
                           'ping_timeout', 'poll_interval', 'rate_limit', 
                           'throttle_logging_level',]
-            }, #queue_maxsizes = self.ww.queue_maxsizes,
-               recv_queue = self.ww.tp.recv_queue, 
-               event_queue = self.ww.tp._event_queue,
-               name_prefix = self.ww.name+'[cnx]',
-               loop = self.ww._loop, 
-               out_loop = self.ww.loop
+            }, #queue_maxsizes = self.wc.queue_maxsizes,
+               recv_queue = self.wc.tp.recv_queue, 
+               event_queue = self.wc.tp._event_queue,
+               name_prefix = self.wc.name+'[cnx]',
+               loop = self.wc._loop, 
+               out_loop = self.wc.loop
         )
         
     def get_value(self, _, keywords, default=None, set='channel'):
@@ -137,20 +137,20 @@ class ChannelsInfo:
                 'cnx': self.cnx_srch_seq}[set](_)
                 
     def channel_srch_seq(self, channel):
-        return [self.ww.channels.get(channel,{}), self.ww.channel_defaults]
+        return [self.wc.channels.get(channel,{}), self.wc.channel_defaults]
     
     def cnx_srch_seq(self, profile):
-        return [self.ww.connection_profiles.get(profile,{}), self.ww.connection_defaults]
+        return [self.wc.connection_profiles.get(profile,{}), self.wc.connection_defaults]
     
     @property
     def channels(self):
-        return self.ww.channels
+        return self.wc.channels
     @property
     def channel_defaults(self):
-        return self.ww.channel_defaults
+        return self.wc.channel_defaults
     @property
     def connection_profiles(self):
-        return self.ww.connection_profiles
+        return self.wc.connection_profiles
     @property
     def connection_defaults(self):
-        return self.ww.connection_defaults
+        return self.wc.connection_defaults
