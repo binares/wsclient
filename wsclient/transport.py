@@ -349,6 +349,14 @@ class Transport:
         is_private = self.wc.cis.get_value(channel,'is_private')
         auth_seq = cnxi.auth_seq(channel)
         apply_to_packs = deep_get(auth_seq, 'apply_to_packs')
+        iscoro = asyncio.iscoroutinefunction(self.wc.sign)
+        
+        async def sign(_aInp):
+            if iscoro:
+                return await self.wc.sign(*_aInp)
+            else:
+                return self.wc.sign(*_aInp)
+        
         
         async def send_pack(i):
             pck = packs[i]
@@ -381,9 +389,9 @@ class Transport:
                 if (is_private and auth_required is None or auth_required) and not via_url:
                     _aInp = [out] if takes_input else []
                     if each_time:
-                        out = self.wc.sign(*_aInp)
+                        out = await sign(_aInp)
                     elif not cnxi.authenticated:
-                        _aOut = self.wc.sign(*_aInp)
+                        _aOut = await sign(_aInp)
                         if not send_separately: 
                             out = _aOut
                         else:
