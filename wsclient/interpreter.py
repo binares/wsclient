@@ -7,7 +7,7 @@ class Interpreter:
         self.wc = wrapper
     
     def generate_message_id(self, uid, unsubscribe=False):
-        c = self.wc.message_id_config
+        c = self.wc.message['id']['config']
         kw = {x:y for x,y in c.items() if x in ('uppers','lowers')}
         #if not c['numbers']: kw['set'] = 'alpha'
         as_int = c['type'] in ('int',int)

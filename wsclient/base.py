@@ -1,8 +1,10 @@
 from .conn_mgr import ConnectionManager
+from .conn import Response
 from .sub import SubscriptionHandler
 from .merged import Merged
 from .interpreter import Interpreter
 from .channel import ChannelsInfo
+from .errors import WSError
 from .url import URLFactory
 from .extend_attrs import WSMeta
 from .transport import Transport
@@ -138,15 +140,31 @@ class WSClient(metaclass=WSMeta):
         'send': 100,
     }
     
-    #numbers are always added, but uppers/lowers can be decluded
-    message_id_config = {
-        'uppers': False,
-        'lowers': True,
-        'length': 14,
-        'type': 'str', #if 'int', return type will be int
+    message = {
+        'id': {
+            #numbers are always added, but uppers/lowers can be decluded
+            'config': {
+                'uppers': False,
+                'lowers': True,
+                'length': 14,
+                'type': 'str', #if 'int', return type will be int
+            },
+            #e.g. "id" if response = {"id": x, ...}; may be a function
+            'key':  None,
+        },
+        'error': {
+            # error is present if error_msg=deep_get([r], keyword) is in .exceptions  
+            # may be a function that extracts the msg
+            'key': None,
+            # extracted from response that you feed to the exception
+            'args_keys': [],
+        },
     }
-    #e.g. "id" if response = {"id": x, ...}
-    message_id_keyword = None
+    
+    # Code/message: exception class
+    exceptions = {
+        '__default__': WSError,
+    }
     
     # WSClient's subsclasses borrow __extend_attrs__ and __deepcopy_on__init__ from their parents,
     # except the attrs that are prefixed with '-' (and plain '-' will omit all from parents)
@@ -180,8 +198,9 @@ class WSClient(metaclass=WSMeta):
         'channels',
         'connection_defaults',
         'connection_profiles',
+        'exceptions',
         'has',
-        'message_id_config',
+        'message',
         'queue_maxsizes',
         'url_components',
     ]
@@ -284,18 +303,75 @@ class WSClient(metaclass=WSMeta):
     
               
     def extract_message_id(self, R):
-        """:type r: Response
-           May want to override this method"""
+        """
+        :type R: Response
+        May want to override this method
+        """
         r = R.data
-        if not isinstance(r,dict) or self.message_id_keyword is None:
+        key = self.message['id']['key']
+        if not isinstance(r, dict) or key is None:
             return None
-        try: 
-            return deep_get([r],self.message_id_keyword)
+        try:
+            if hasattr(key, '__call__'):
+                return key(r)
+            else:
+                return deep_get([r], key)
         except Exception as e:
             logger.error('{} - could not extract id: {}. r: {}.'.format(self.name, e, r))
             return None
     
-                
+    
+    def extract_errors(self, R):
+        """
+        :type R: Response
+        :returns: list of errors
+        May want to override this method
+        """
+        r = R.data if isinstance(R, Response) else R
+        key = self.message['error']['key']
+        if not isinstance(r, dict) or key is None:
+            return []
+        
+        try:
+            if hasattr(key, '__call__'):
+                msg = key(r)
+            else:
+                msg = deep_get([r], key)
+            
+            e_cls = self.exceptions.get(msg, self.exceptions['__default__'])
+            args = self.create_error_args(r)
+            if not args:
+                args = [msg]
+            
+            errors = [e_cls(*args)]
+        
+        except Exception as e:
+            logger.error('{} - exception occurred while extracting errors: {}. r: {}.' \
+                         .format(self.name, repr(e), r))
+            logger.exception(e)
+            errors = []
+        
+        return errors
+    
+    
+    def create_error_args(self, r):
+        """
+        :returns: arguments for initiating the error
+        May want to override this method
+        """
+        args_keys = self.message['error']['args_keys']
+        if args_keys is None:
+            return []
+        args = []
+        for key in args_keys:
+            if hasattr(key, '__call__'):
+                args.append(key(r))
+            else:
+                args.append(deep_get([r], key))
+        
+        return args
+    
+    
     def handle(self, R):
         """:type R: Response
           Override this for specific socket response handling. 

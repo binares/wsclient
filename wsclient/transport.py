@@ -214,10 +214,10 @@ class Transport:
             if R is _quit_command:
                 break
             
-            try: 
-                if iscoro: 
+            try:
+                if iscoro:
                     await self.wc.handle(R)
-                else: 
+                else:
                     self.wc.handle(R)
             except Exception as e:
                 str_r = str(R.data)
@@ -226,15 +226,18 @@ class Transport:
                     self.wc.name, e.__class__.__name__, str_r[:200], dots))
                 logger.error(str_r)
                 logger.exception(e)
-            else: 
+            else:
                 message_id = self.wc.extract_message_id(R)
                 if message_id is not None:
+                    errors = self.wc.extract_errors(R)
+                    error = errors if isinstance(errors, Exception) else \
+                                (errors[0] if len(errors) else None)
                     ftw = functools.partial(
-                        self.forward_to_waiters, message_id, R, True)
+                        self.forward_to_waiters, message_id, R, error=error, remove=True, copy=1)
                     self.wc._loop.call_soon_threadsafe(
                         functools.partial(trylog, ftw))
                 self.station.broadcast('recv')
-
+        
         if recv is not None:
             recv.cancel()
     
@@ -424,15 +427,22 @@ class Transport:
             r.append(await send_pack(i))
         
         return r[0] if single else r
-            
-            
-    def forward_to_waiters(self, message_id, message, remove=True, copy=None):
+    
+    
+    def forward_to_waiters(self, message_id, message, error=None, remove=True, copy=None):
         try: waiters = self.waiters[message_id]
         except KeyError: return
         for i,waiter in enumerate(waiters):
             if copy is True or isinstance(copy, int) and copy is not False and copy >= i:
-                message = _copy.deepcopy(message)
-            try: waiter.set_result(message)
+                if error is None:
+                    message = _copy.deepcopy(message)
+                else:
+                    error = _copy.deepcopy(error)
+            try:
+                if error is None:
+                    waiter.set_result(message)
+                else:
+                    waiter.set_exception(error)
             except asyncio.InvalidStateError:
                 logger.error('{} - "{}"\'s waiter #{} result has already been set'.format(
                     self.wc.name, message_id, i))
