@@ -30,6 +30,7 @@ class E(D):
     a = {51: 52}
     b = {'p': 'q'}
     c = {'x': 'xx'}
+    e = {'e': {'ee': 'eee'}}
     __extend_attrs__ = ['b','-']
     __deepcopy_on_init__ = ['-','e']
     
@@ -68,3 +69,11 @@ def test_extend_attrs():
     
     e = E()
     assert e.doi == E._E__deepcopy_on_init
+    
+    # Verify that the attrs were copied
+    assert e.a is E.a
+    assert e.b is E.b
+    assert e.c is E.c
+    assert e.e == E.e
+    assert e.e is not E.e
+    assert e.e['e'] is not E.e['e']

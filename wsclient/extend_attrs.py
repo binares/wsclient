@@ -25,6 +25,7 @@ class ExtendAttrs(type):
         mro_included = (attrs,) + mro
         extend_attrs = ExtendAttrs._join(mro_included, '__extend_attrs__')
         
+        # Extend the attributes listed in 'extend_attrs'
         for _ in extend_attrs:
             try: nxt_value = next(getattr(x, _) for x in mro if hasattr(x, _))
             except StopIteration: continue
@@ -43,7 +44,13 @@ class ExtendAttrs(type):
             attrs['_{}__deepcopy_on_init'.format(name)] = attrs['__deepcopy_on_init__']
             deepcopy_on_init = ExtendAttrs._join(mro_included, '__deepcopy_on_init__')
             attrs['__deepcopy_on_init__'] = deepcopy_on_init
-       
+        
+        # Override object class' __new__ method so that it would deepcopy the attrs
+        # listed in __deepcopy_on_init__ before calling __init__ of the class
+        is_first = not any(isinstance(x, ExtendAttrs) for x in bases)
+        if is_first:
+            ExtendAttrs.override__new__(mro, attrs)
+        
         return super(ExtendAttrs, cls).__new__(cls, name, bases, attrs)
     
     
@@ -75,6 +82,32 @@ class ExtendAttrs(type):
                     extend_attrs.append(attr)
                 
         return extend_attrs
+    
+    
+    @staticmethod
+    def override__new__(mro, attrs):
+        if '__new__' in attrs:
+            orig_new = attrs['__new__']
+        elif len(mro):
+            orig_new = mro[0].__new__
+        else:
+            orig_new = object.__new__
+        
+        def __new_with_deepcopy__(cls, *args, **kw):
+            obj = orig_new(cls)
+            ExtendAttrs.deepcopy_attrs(obj)
+            return obj
+
+        attrs['__new__'] = __new_with_deepcopy__
+    
+    
+    @staticmethod
+    def deepcopy_attrs(obj):
+        if not hasattr(obj, '__deepcopy_on_init__'):
+            return
+        for key in obj.__deepcopy_on_init__:
+            if hasattr(obj, key):
+                setattr(obj, key, _copy.deepcopy(getattr(obj, key)))
 
 
 class CreateProperties(type):

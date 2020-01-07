@@ -231,10 +231,7 @@ class WSClient(metaclass=WSMeta):
     def __init__(self, config={}):
         for key in config:
             setattr(self, key, deep_update(getattr(self, key, None), config[key], copy=True))
-        for key in self.__deepcopy_on_init__:
-            if key in config or not hasattr(self,key): continue
-            setattr(self, key, _copy.deepcopy(getattr(self,key)))
-            
+        
         self.name = create_name(getattr(self,'name',None), self.__class__.__name__, self.name_registry)
 
         if getattr(self,'loop',None) is None:
