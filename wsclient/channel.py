@@ -79,14 +79,24 @@ class ChannelsInfo:
         if converter is not None:
             params = converter(params.copy())
             
-        funcs = dict.fromkeys(['handle', 'on_activate', 'ping'])
+        funcs = dict.fromkeys(['handle', 'on_activate', 'ping', 'extra_headers'])
+        _sets = {'extra_headers': 'channel'}
+        _as_list = ['handle','on_activate']
+        
         for name in funcs:
-            var = self.get_value(profile, name, set='cnx')
-            if var is None: continue
+            set = _sets.get(name, 'cnx')
+            if set == 'cnx':
+                var = self.get_value(profile, name, set=set)
+            else:
+                var = self.get_value(channel, name, set=set)
+            if var is None:
+                continue
             if isinstance(var, str) or not hasattr(var, '__iter__'):
                 var = [var]
             var = [self.wc.ip.interpret_variable(v) for v in var]
-            funcs[name] = var if name != 'ping' else var[0]
+            if name not in _as_list:
+                var = var[0]
+            funcs[name] = var
             
         return dict(
             url = self.get_value(channel, 'url_factory').copy(params),

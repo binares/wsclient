@@ -17,12 +17,25 @@ class URLFactory:
         
         
     async def create_url(self, params):
+        """
+        :returns: a dict with `url` and `extra_headers`
+        """
         if params is None:
             params = self.params
-        final = []
+        
+        str_parts = []
+        headers = {}
+        
         for name,type in zip(self.names,self.types):
+            # Each resolved can be either
+            #  - <str> (appended to the url)
+            #  - <dict> (extended to headers)
+            #  - None (ignored)
+            # or a list of those
             if type == 'plain':
                 resolved = name
+            elif type == 'attribute':
+                resolved = getattr(self.wc, name)
             elif type in ('variable',):
                 resolved = params[name]
             elif type == 'component':
@@ -38,9 +51,26 @@ class URLFactory:
             else:
                 raise ValueError(type)
             
-            final.append(resolved)
+            if isinstance(resolved, (str, dict)) or resolved is None:
+                resolved = [resolved]
             
-        return ''.join(final)
+            for x in resolved:
+                if x is None:
+                    continue
+                elif isinstance(x, dict):
+                    headers.update(x)
+                else:
+                    str_parts.append(x)
+        
+        url = ''.join(str_parts)
+        
+        config = {
+            'url': url,
+        }
+        if headers:
+            config['extra_headers'] = headers
+        
+        return config
     
     @staticmethod
     def split(url):
@@ -67,13 +97,19 @@ class URLFactory:
             return 'plain', x
         
         x = x[1:-1]
-        if x[:1] == '$':
-            return 'component', x[1:]
+        
+        if x[:1] == '$' or x[:2] == 'c$':
+            return 'component', x[x.find('$')+1:]
+        
+        elif x[:2] == 'a$':
+            return 'attribute', x[2:]
+        
         elif x[:2] != 'm$':
             return 'variable', x
         
         shared = ':shared' if x.endswith(':shared') else ''
-        if shared: x = x[:-len(':shared')]
+        if shared:
+            x = x[:-len(':shared')]
         
         if x[:2] == 'm$':
             return 'method{}'.format(shared), x[2:]

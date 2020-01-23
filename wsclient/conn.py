@@ -34,17 +34,20 @@ class Connection:
                  ping_interval=None, ping=None, ping_after=None, ping_timeout=5,
                  ping_as_message=False, rate_limit=None, poll_interval=None,
                  queue_maxsizes={}, recv_queue=None, event_queue=None,
-                 id=None, name_prefix=None, loop=None, out_loop=None, throttle_logging_level=0):
+                 id=None, name_prefix=None, loop=None, out_loop=None, throttle_logging_level=0,
+                 extra_headers=None):
         """
         :param url: str or (coroutine) function that returns str
         :param handle: (sync) function or list of functions (or None)
         :param on_activate: (a)sync function or list of functions (or None)
         :param out_loop: for station events and queues (recv [received] queue, event queue)
+        :param extra_headers: (coroutine) function that returns dict
         """
         if ping_interval is not None and not ping_as_message and signalr:
             raise ValueError('Cannot send raw ping frames if `signalr` is set to True. ' \
                              'You could enable `ping_as_message` instead.')
         self.url = url
+        self.extra_headers = extra_headers
         self.handle = handle
         self.on_activate = on_activate
         #if id is None, returns free connection number (as str)
@@ -121,14 +124,37 @@ class Connection:
         
     async def _connect(self):
         logger.debug("{} - connecting".format(self.name))
+        params = {}
+        
         url = self.url
         if hasattr(self.url,'__call__'):
             url = url()
         if inspect.isawaitable(url):
             url = await url
+        
+        headers_from_url = {}
+        if isinstance(url, dict):
+            _headers = url.get('extra_headers')
+            if _headers is not None:
+                headers_from_url.update(_headers)
+            url = url['url']
         logger.debug("{} url: {}".format(self.name, url))
+        
+        extra_headers = self.extra_headers
+        if hasattr(extra_headers,'__call__'):
+            extra_headers = extra_headers()
+        if inspect.isawaitable(extra_headers):
+            extra_headers = await extra_headers
+        
+        if extra_headers is None:
+            extra_headers = {}
+        
+        final_headers = dict(extra_headers, **headers_from_url)
+        if final_headers:
+            params['extra_headers'] = final_headers
+        
         if not self.signalr:
-            await self._connect_ordinary(url)
+            await self._connect_ordinary(url, params)
         else:
             await self._connect_signalr(url)
             
@@ -136,8 +162,8 @@ class Connection:
         self.connected_ts = time.time()
         #self.socket.settimeout(self.timeout)
         
-    async def _connect_ordinary(self, url):
-        self.conn = websockets.connect(url)
+    async def _connect_ordinary(self, url, params={}):
+        self.conn = websockets.connect(url, **params)
         self.socket = await self.conn.__aenter__()
         q = self._socket_recv_queue
         
@@ -297,6 +323,7 @@ class Connection:
                         self.ping_interval,
                         keepalive={'pause':self.ping_interval/3},
                         loop=self.loop,
+                        logging_level=0,
                         name='{}-Ping-Ticker'.format(self.name))
         self.futures['ping'] = asyncio.ensure_future(self.ping_ticker.loop())
             
