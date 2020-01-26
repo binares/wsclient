@@ -179,6 +179,9 @@ class Transport:
         self.wc.broadcast_event('active', 1)
         
         try:
+            await call_via_loop(self.wc.wait_till_active, (5,),
+                                loop=self.wc.loop, module='asyncio')
+            await self.wc.wait_till_active(1)
             # Connections will be started when subscriptions are being pushed
             # (in .send method). Note that since this here is running in ._thread,
             # the subscription out messages are NOT sent via the queue.
