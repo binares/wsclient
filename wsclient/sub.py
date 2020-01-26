@@ -7,6 +7,7 @@ td = datetime.timedelta
 
 import fons.log as _log
 from fons.event import Station
+from fons.func import get_arg_count
 
 from .errors import (SubscriptionError, SubscriptionLimitExceeded)
 from .merged import Merged
@@ -117,6 +118,14 @@ class SubscriptionHandler:
             
         if free is not None and count > free:
             raise SubscriptionLimitExceeded
+        
+        on_creation = self.wc.cis.get_value(channel, 'on_creation')
+        if isinstance(on_creation, str):
+            on_creation = self.wc.ip.interpret_variable(on_creation)
+        
+        if on_creation is not None:
+            _args = [_copy.deepcopy(params)] if get_arg_count(on_creation) else []
+            on_creation(*_args)
         
         merge = count > 1
         if merge:

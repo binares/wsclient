@@ -67,6 +67,10 @@ class WSClient(metaclass=WSMeta):
         'merge_index': None, #by default 1
         # if False, .remove_subscription raises WSError on that channel
         'unsub_option': True,
+        # Function that is called in .subscribe_to (-> .sh.add_subscription)
+        # *may* be string (as "m$methodNameHere")
+        # *may* have a first argument for the subscription params (i.e. {'_': channel, ...})
+        'on_creation': None,
         # Fetch necessary subscription related data shortly after 
         # subscription becomes active
         'fetch_data_on_sub': True,
