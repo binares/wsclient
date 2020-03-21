@@ -65,6 +65,11 @@ class SubscriptionHandler:
         """:param params: dict or id_tuple"""
         if hasattr(params, '__iter__') and not isinstance(params, dict):
             params = self.wc.cis.parse_id_tuple(params)
+        else:
+            params = params.copy()
+        output = self.wc.transform(params)
+        if output is not None:
+            params = output
         channel = params['_']
         self.wc.cis.verify_has(channel)
         self.wc.cis.verify_input(params)

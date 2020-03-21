@@ -304,6 +304,12 @@ class Transport:
            :param sub:
              if subscription, True for subbing, False for unsubbing
         """
+        if isinstance(params, dict):
+            params = params.copy()
+            output = self.wc.transform(params)
+            if output is not None:
+                params = output
+        
         if isinstance(params, dict) and cnx is None:
             cnx = self.wc.sh.find_available_connection(params, create=True)
             

@@ -278,23 +278,36 @@ class WSClient(metaclass=WSMeta):
     
     
     def on_start(self):
-        """Overwrite this method. May be asynchronous.
-           Is executed as the first thing when .start() is awaited on."""
+        """
+        Overwrite this method. May be asynchronous.
+        Is executed as the first thing when .start() is awaited on.
+        """
     
     
     def send(self, params, wait=False, id=None, cnx=None, sub=None):
         return asyncio.ensure_future(self.tp.send(params,wait,id,cnx,sub), loop=self.loop)
     
     
+    def transform(self, params):
+        """
+        This is called after .sh.add_subscription(), but before (parallel) cnx_params_converter()
+        (preparing for url creation) and .encode() (sent to websocket).
+        It is also called in .tp.send(), IF plain params are sent (not Subscription / Request)
+        Params can be modified inplace OR returned as a new dict.
+        """
+    
+    
     def encode(self, request, sub=None):
-        """Overwrite this method
-           :param request: a Request / Subscription object (containing .params)
-           :param sub: if None, this is a non-subscription request. 
-                       Otherwise True for subbing and False for unsubbing.
-           :returns: output               | (non-tuple) 
-                     (output, message_id) | (tuple)
-                     .merge([pck0, pck1, ...]) where `pck` is on of the two above
-            The output will be sent to socket (but before that json encoding will be applied)"""
+        """
+        Overwrite this method
+        :param request: a Request / Subscription object (containing .params)
+        :param sub: if None, this is a non-subscription request. 
+                    Otherwise True for subbing and False for unsubbing.
+        :returns: output               | (non-tuple) 
+                  (output, message_id) | (tuple)
+                  .merge([pck0, pck1, ...]) where `pck` is on of the two above
+        The output will be sent to socket (but before that json encoding will be applied)
+        """
         raise NotImplementedError
     
     
