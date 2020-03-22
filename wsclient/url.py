@@ -135,8 +135,13 @@ class URLFactory:
         
         for obj in (self,other):
             for name,type in zip(obj.names, obj.types):
-                if type in ('method', 'variable'):
+                if type=='method':
                     return False
+                elif type=='variable':
+                    v1 = self.params.get(name)
+                    v2 = other.params.get(name)
+                    if None in (v1, v2) or v1 != v2:
+                        return False
                 elif type == 'component' and not isinstance(self.wc.url_components[name], str):
                     return False
                 
