@@ -116,6 +116,7 @@ class Connection:
         self._queues = {}
         self.futures = dict.fromkeys(['start', 'stop', 'ping', 'recv_loop', 
                                       'on_activate', 'signalr_wait'])
+        self.connected_url = None
         self.connected_ts = None
         self.last_recv_ts = None
         self._last_ping_ts = None
@@ -153,12 +154,15 @@ class Connection:
         if final_headers:
             params['extra_headers'] = final_headers
         
-        if not self.signalr:
+        if not url:
+            pass
+        elif not self.signalr:
             await self._connect_ordinary(url, params)
         else:
             await self._connect_signalr(url)
             
         logger.debug("{} - connection established".format(self.name))
+        self.connected_url = url
         self.connected_ts = time.time()
         #self.socket.settimeout(self.timeout)
         
@@ -253,7 +257,7 @@ class Connection:
         self.broadcast_event('running', 1)
         await self._safe_activate(self.connect_timeout)
         
-        if not self._stopped:
+        if not self._stopped and self.connected_url:
             self._start_ping_ticker()
         
         self._ignore_recv_ts = True
@@ -335,7 +339,7 @@ class Connection:
         return r
        
     def _verify_recv_timeout(self):
-        if self.recv_timeout is not None and not self._ignore_recv_ts and \
+        if self.connected_url and self.recv_timeout is not None and not self._ignore_recv_ts and \
                 self.last_recv_ts is not None and time.time() - self.last_recv_ts > self.recv_timeout:
             logger2.error('{} - recv timeout occurred. Reconnecting.'.format(self.name))
             asyncio.ensure_future(self._exit_conn(self.conn))
@@ -493,7 +497,9 @@ class Connection:
         
     async def _exit_conn(self, conn=None):
         conn = conn if conn is not None else self.conn
-        if not self.signalr:
+        if conn is None:
+            pass
+        elif not self.signalr:
             if hasattr(conn, 'ws_client'):
                 try: await conn.__aexit__(*sys.exc_info())
                 except Exception as e: logger.exception(e)

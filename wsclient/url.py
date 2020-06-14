@@ -151,3 +151,7 @@ class URLFactory:
     def __call__(self):
         #Note that it returns coroutine
         return self.create_url(self.params)
+    
+    
+    def __bool__(self):
+        return bool(self.notation)

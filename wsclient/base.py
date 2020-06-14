@@ -56,11 +56,11 @@ class WSClient(metaclass=WSMeta):
         # If channel's url is None, this will be used (may be a function):
         #  final_url = (url / url()).format(**self.url_compontents)
         #  (wrapped by .cis.wrap_url(url))
-        'url': None,
+        'url': '',
         'connection_profile': None,
         # Whether or not .tp.send actually sends something to the cnx socket
         # (as opposed to just connecting)
-        'send': True,
+        'send': True, # if `url` is undefined ('') then this doesn't count
         'cnx_params_converter': None,
         'merge_option': False,
         'merge_limit': None, #>=2 for merge support
@@ -469,8 +469,10 @@ class WSClient(metaclass=WSMeta):
             return
         self._closed = True
         self.stop()
-        
-        
+    
+    @property
+    def subscriptions(self):
+        return self.sh.subscriptions[:]
     @property
     def has_got(self):
         return self.cis.has_got

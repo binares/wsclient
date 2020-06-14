@@ -199,10 +199,10 @@ class SubscriptionHandler:
         # (after *compulsory* stopping in "no send" case, as that is the only way to stop its feed),
         # re-subscribing on the old cnx could cause delay due to the old's "stop" future not having completed yet
         #Thus to guarantee the fluency it's better to delete the cnx entirely
-        send = self.wc.cis.get_value(s.channel,'send',True)
+        send = self.wc.cis.get_value(s.channel,'send')
         #Cnx with param variance probably can't be reused
         #if s.is_merger() and not any(s.cnx is _s.cnx for _s in self.subscriptions):
-        if not send and not any(s.cnx is _s.cnx for _s in self.subscriptions):
+        if s.cnx.url and not send and not any(s.cnx is _s.cnx for _s in self.subscriptions):
             self.wc.cm.remove_connection(s.cnx, delete=True)
         
         return True

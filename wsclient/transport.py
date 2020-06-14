@@ -325,18 +325,18 @@ class Transport:
         cnx = rq.cnx
         channel = rq.channel
         cnxi = self.wc.cm.cnx_infs[cnx]
-        send = self.wc.cis.get_value(channel,'send',True)
+        send = self.wc.cis.get_value(channel,'send')
         
-        if not cnx.is_running() and sub is not False:
+        if not cnx.is_running() and (sub is None or sub):
             try: cnx.start()
             except RuntimeError: pass
             await cnx.wait_till_active(cnx.connect_timeout)
-        elif sub is False and not send:
+        elif (sub is not None and not sub) and cnx.url and not send:
             # Due to param variance difference old connections would not satisfy
             # the new variance, and would remain unused
             # if rq.is_merger() and not any(_s.merger is not rq and _s.cnx is cnx
             #                               for _s in self.wc.sh.subscriptions):
-            if not send and not any(cnx is _s.cnx for _s in self.wc.sh.subscriptions):
+            if not any(cnx is _s.cnx for _s in self.wc.sh.subscriptions):
                 self.wc.cm.remove_connection(cnx, True)
             if cnx.is_running():
                 await cnx.stop()
@@ -345,7 +345,7 @@ class Transport:
         add_waiter = wait is not False
         return_waiter = wait in ('return','return-waiter','return_waiter','return waiter')
 
-        if send: pass
+        if cnx.url and send: pass
         elif not add_waiter or not return_waiter: 
             return None
         else:
