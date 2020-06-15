@@ -42,18 +42,25 @@ class ChannelsInfo:
     def verify_has(self, channel, *args, throw=True):
         keys = (channel,) + args
         cur = self.wc.has
+        answer = False
+        exceeded = False
+        
         for i,key in enumerate(keys):
+            if not isinstance(cur,dict):
+                exceeded = True
+                break
             if hasattr(key,'__iter__') and not isinstance(key,str):
                 key_list = key
                 return all(self.verify_has(*keys[:i], k, *keys[i+1:], throw=throw) 
                            for k in key_list)
             cur = cur.get(key)
-            if not isinstance(cur,dict):
-                break
-        if isinstance(cur,dict) and '_' in cur:
-            cur = cur['_']
-        #True if dict contains items
-        answer = bool(cur)
+        
+        if not exceeded:
+            if isinstance(cur,dict) and '_' in cur:
+                cur = cur['_']
+            # True if dict contains items
+            answer = bool(cur)
+        
         if not throw:
             return answer
         elif answer:
