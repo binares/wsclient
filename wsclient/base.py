@@ -251,13 +251,7 @@ class WSClient(metaclass=WSMeta):
         
         self._closed = False
         
-        for ch_values in list(self.channels.values()) + [self.channel_defaults]:
-            if ch_values.get('url') is not None:
-                ch_values['url_factory'] = URLFactory(self, ch_values['url'])
-            cpc = ch_values.get('cnx_params_converter')
-            if isinstance(cpc, str):
-                if cpc.startswith('m$'): cpc = cpc[2:]
-                ch_values['cnx_params_converter'] = getattr(self, cpc)
+        self.reload_urls()
         
         if getattr(self,'subscriptions',None) is not None:
             for params in self.subscriptions:
@@ -469,6 +463,16 @@ class WSClient(metaclass=WSMeta):
             return
         self._closed = True
         self.stop()
+    
+    
+    def reload_urls(self):
+        for ch_values in list(self.channels.values()) + [self.channel_defaults]:
+            if ch_values.get('url') is not None:
+                ch_values['url_factory'] = URLFactory(self, ch_values['url'])
+            cpc = ch_values.get('cnx_params_converter')
+            if isinstance(cpc, str):
+                if cpc.startswith('m$'): cpc = cpc[2:]
+                ch_values['cnx_params_converter'] = getattr(self, cpc)
     
     @property
     def subscriptions(self):
