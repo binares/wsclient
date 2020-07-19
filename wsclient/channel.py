@@ -110,7 +110,7 @@ class ChannelsInfo:
             **funcs,
             **{
                x: self.get_value(profile, x, set='cnx')
-                for x in ['signalr', 'hub_name', 'hub_methods', 
+                for x in ['signalr', 'hub_name', 'hub_methods', 'socketio', 'event_names',
                           'reconnect_try_interval', 'connect_timeout', 'recv_timeout', 
                           'ping_interval', 'ping_after', 'ping_as_message',
                           'ping_timeout', 'poll_interval', 'rate_limit', 

@@ -1,5 +1,6 @@
 import websockets
 import signalr_aio_wsclient as signalr_aio
+import socketio
 import sys
 import json
 import asyncio
@@ -30,6 +31,7 @@ _heartbeat = object()
 class Connection:
     def __init__(self, url, handle=None,*, on_activate=None,
                  signalr=False, hub_name=None, hub_methods=None,
+                 socketio=False, event_names=None,
                  reconnect_try_interval=None, connect_timeout=None, recv_timeout=None, 
                  ping_interval=None, ping=None, ping_after=None, ping_timeout=5,
                  ping_as_message=False, rate_limit=None, poll_interval=None,
@@ -43,9 +45,12 @@ class Connection:
         :param out_loop: for station events and queues (recv [received] queue, event queue)
         :param extra_headers: (coroutine) function that returns dict
         """
-        if ping_interval is not None and not ping_as_message and signalr:
-            raise ValueError('Cannot send raw ping frames if `signalr` is set to True. ' \
-                             'You could enable `ping_as_message` instead.')
+        if signalr and socketio:
+            raise ValueError('`signalr` and `socketio` can\'t be simultaneously True')
+        if ping_interval is not None and not ping_as_message and (signalr or socketio):
+            which = 'signalr' if signalr else 'socketio'
+            raise ValueError('Cannot send raw ping frames if `{}` is set to True. ' \
+                             'You could enable `ping_as_message` instead.'.format(which))
         self.url = url
         self.extra_headers = extra_headers
         self.handle = handle
@@ -57,9 +62,11 @@ class Connection:
                                       else name_prefix, self.id)
         self.name = create_name(None, default_name, _CONNECTION_NAMES, add_int='if_taken')
         
+        self.socketio = socketio
         self.signalr = signalr
         self.hub_name = hub_name
         self.hub_methods = hub_methods if hub_methods is not None else []
+        self.event_names = event_names if event_names is not None else []
         self.conn = None
         self.socket = None
         self.hub = None
@@ -88,10 +95,10 @@ class Connection:
                                          0: self.out_loop},
                                name = self.name+'[Station]')
        
-        station_channels = ['started','active','stopped','empty','event','recv']
+        station_channels = ['started','active','stopped','_stop_initiated','empty','event','recv']
         for ch in station_channels:
             self.station.add_channel(ch)
-        for ch in ['started','active','stopped','empty']:
+        for ch in ['started','active','stopped','_stop_initiated','empty']:
             self.station.add_event(ch, id=0)
             
         def _add_q(ch, q_id, queue):
@@ -122,9 +129,11 @@ class Connection:
         self._last_ping_ts = None
         self._ignore_recv_ts = False
         self._stopped = False
-        
+    
+    
     async def _connect(self):
-        logger.debug("{} - connecting".format(self.name))
+        suffix = ' (socketio)' if self.socketio else (' (signalr)' if self.signalr else '')
+        logger.debug("{} - connecting{}".format(self.name, suffix))
         params = {}
         
         url = self.url
@@ -156,16 +165,19 @@ class Connection:
         
         if not url:
             pass
-        elif not self.signalr:
-            await self._connect_ordinary(url, params)
-        else:
+        elif self.signalr:
             await self._connect_signalr(url)
-            
+        elif self.socketio:
+            await self._connect_socketio(url)
+        else:
+            await self._connect_ordinary(url, params)
+        
         logger.debug("{} - connection established".format(self.name))
         self.connected_url = url
         self.connected_ts = time.time()
         #self.socket.settimeout(self.timeout)
-        
+    
+    
     async def _connect_ordinary(self, url, params={}):
         self.conn = websockets.connect(url, **params)
         self.socket = await self.conn.__aenter__()
@@ -181,7 +193,8 @@ class Connection:
 
         self.futures['recv_loop'] = \
             asyncio.ensure_future(recv_loop())
-            
+    
+    
     async def _connect_signalr(self, url):
         self.conn = signalr_aio.Connection(url, session=None)
         self.hub = self.conn.register_hub(self.hub_name)
@@ -192,15 +205,17 @@ class Connection:
         for method in self.hub_methods:
             self.hub.client.on(method, do_nothing)
         #messages to .recv are forwarded via signal_recv_queue
-        #TODO: set max size to this queue?
         q = self._socket_recv_queue
         async def put_to_recv_queue(**data):
             await q.put(data)
             
         self.conn.received += put_to_recv_queue
         self.conn.start()
-        await asyncio.sleep(0.1)
+        
         signalr_fut = self.conn._Connection__transport._conn_handler
+        await asyncio.wait([signalr_fut], timeout=0.5)
+        if signalr_fut.done():
+            await signalr_fut # raises exception if occurred
         
         async def wait_on_signalr_future():
             try:
@@ -213,12 +228,61 @@ class Connection:
                 await q.put(websockets.ConnectionClosed(-1, 'signalr ws closed'))
                 
         self.futures['signalr_wait'] = asyncio.ensure_future(wait_on_signalr_future())
+    
+    
+    async def _connect_socketio(self, url):
+        self.conn = sio = socketio.AsyncClient(reconnection=False)
+        #messages to .recv are forwarded via signal_recv_queue
+        q = self._socket_recv_queue
+        connected = asyncio.Event()
         
-    async def _activate(self):
-        #Renew the queue to ensure that we won't be receiving anything from previous sockets
+        async def message(data):
+            await q.put(data)
+        
+        for event in self.event_names:
+            sio.on(event)(message)
+        
+        @sio.event
+        async def connect():
+            connected.set()
+        
+        @sio.event
+        async def connect_error(*args):
+            logger.debug('{} - socketio encountered connect error'.format(self.name))
+            await q.put(websockets.ConnectionClosed(-1, 'socketio connect error'))
+        
+        # This isn't executed when user itself evokes sio.disconnect (or here Connection.stop())
+        @sio.event
+        async def disconnect():
+            logger.debug('{} - socketio connection has crashed'.format(self.name))
+            await q.put(websockets.ConnectionClosed(-1, 'socketio ws crashed'))
+        
+        await sio.connect(url, transports='websocket')
+        await connected.wait()
+    
+    
+    async def _activate(self, timeout=None):
+        # Close any previous connection if by chance left open (though it shouldn't happen)
+        await self._exit_conn() 
+        # Renew the queue to ensure that we won't be receiving anything from previous sockets
+        # TODO: set max size to this queue?
         self._socket_recv_queue = asyncio.Queue(loop=self.loop)
         self.conn = None
-        await self._connect()
+        fut = asyncio.ensure_future(self._connect())
+        wait_started = time.time()
+        is_exceeded = lambda: timeout is not None and time.time() - wait_started > timeout
+        while not self._stopped and not is_exceeded() and not fut.done():
+            await asyncio.wait([fut], timeout=0.1)
+        to_occurred = is_exceeded()
+        if fut.done():
+            await fut # raise exception if occurred
+        else:
+            fut.cancel()
+            await self._exit_conn()
+            if to_occurred:
+                raise asyncio.TimeoutError('{} - connect timeout occurred'.format(self.name))
+        if self._stopped:
+            return
         self.station.broadcast('active')
         self.broadcast_event('socket', 1)
         if self.on_activate is not None:
@@ -229,12 +293,13 @@ class Connection:
                 key = 'on_activate{}'.format('_{}'.format(i) if i else '')
                 self.futures[key] = call_via_loop_afut(f, args)
     
+    
     async def _safe_activate(self, timeout=None):
-        coro = safeAsyncTry(self._activate, attempts=True,
-                            pause=self.reconnect_try_interval,
-                            exit_on=self.station.get_event('stopped',0,loop=-1))
-        await asyncio.wait_for(coro, timeout)
-        
+        await safeAsyncTry(self._activate, (timeout,), attempts=True,
+                           pause=self.reconnect_try_interval,
+                           exit_on=self.station.get_event('_stop_initiated',0,loop=-1))
+    
+    
     def start(self):
         f = self.futures['start']
         if f is not None and not f.done():
@@ -243,7 +308,8 @@ class Connection:
         self.futures['start'] = f = \
             asyncio.ensure_future(self._start(), loop=self.loop)
         return f
-        
+    
+    
     async def _start(self):
         fstop = self.futures['stop']
         if fstop is not None and not fstop.done():
@@ -252,7 +318,8 @@ class Connection:
 
         self.station.broadcast_multiple(
             [{'_': 'started', 'op': 'set'},
-             {'_': 'stopped', 'op': 'clear'},]
+             {'_': 'stopped', 'op': 'clear'},
+             {'_': '_stop_initiated', 'op': 'clear'},]
         )
         self.broadcast_event('running', 1)
         await self._safe_activate(self.connect_timeout)
@@ -318,7 +385,9 @@ class Connection:
                 if self.futures[fn] is not None:
                     self.futures[fn].cancel()
             self.stop()
-            
+            await self._exit_conn()
+    
+    
     def _start_ping_ticker(self):
         if self.ping_interval is None:
             return
@@ -330,14 +399,19 @@ class Connection:
                         logging_level=0,
                         name='{}-Ping-Ticker'.format(self.name))
         self.futures['ping'] = asyncio.ensure_future(self.ping_ticker.loop())
-            
+    
+    
     def decode_response(self, r):
         """If signalr enabled then r may contain byte strings,
            override this method to decode them."""
-        if not self.signalr:
+        if self.signalr:
+            return r
+        elif self.socketio:
+            return r # json.loads(r['data'])
+        else:
             return json.loads(r)
-        return r
-       
+    
+    
     def _verify_recv_timeout(self):
         if self.connected_url and self.recv_timeout is not None and not self._ignore_recv_ts and \
                 self.last_recv_ts is not None and time.time() - self.last_recv_ts > self.recv_timeout:
@@ -346,15 +420,17 @@ class Connection:
             #To force the current recv to complete itself (if not already done)
             self._socket_recv_queue.put_nowait(_heartbeat)
             raise websockets.ConnectionClosed(-2, 'recv timeout occurred')
-        
+    
+    
     async def _on_websocket_error(self):
         self._ignore_recv_ts = True
         if self._stopped: return
         logger2.debug("{}'s websocket has crashed. Reconnecting.".format(self.name))
         self.station.broadcast('active', op='clear')
         self.broadcast_event('socket', 0)
-        await self._safe_activate(None)
-        
+        await self._safe_activate(self.connect_timeout)
+    
+    
     def _get_recv(self):
         #will cause some receptions to be lost, as the task wrapped around _socket.recv()
         # is cancelled when timeout occurs:
@@ -367,25 +443,31 @@ class Connection:
             return r
         return asyncio.ensure_future(get_from_queue())
     
+    
     async def recv(self, timeout=None, queue_id=0, strip=True):
         queue = self.station.get_queue('recv', queue_id)
         r = asyncio.wait_for(await queue.get(), timeout)
         if strip: 
             r = r.data
         return r
-        
+    
+    
     def send(self, message, dump=True):
         return call_via_loop_afut(self._send, (message, dump), loop=self.loop)
+    
     
     async def _send(self, message, dump=True):
         await self.throttle()
         await self.wait_till_active(self.connect_timeout)
         tlogger.debug('{} - sending: {}'.format(self.name, message))
-        if not self.signalr:
+        if self.signalr:
+            self.hub.server.invoke(*message)
+        elif self.socketio:
+            await self.conn.emit(*message)
+        else:
             send_msg = json.dumps(message) if dump else message
             await self.socket.send(send_msg)
-        else:
-            self.hub.server.invoke(*message)
+    
     
     async def ping(self):
         try:
@@ -408,7 +490,8 @@ class Connection:
                         websockets.ConnectionClosed(-3, 'Ping timeout occurred'))
                 finally:
                     self._last_ping_ts = time.time()
-        
+    
+    
     async def throttle(self):
         await self._throttle()
     
@@ -416,22 +499,26 @@ class Connection:
     async def _throttle(self):
         pass
     
+    
     def is_running(self):
         return self.futures['start'] is not None and not self.futures['start'].done() and \
             self.station.get_event('started',0,loop=0).is_set()
     
+    
     def is_active(self):
         return self.is_running() and self.station.get_event('active',0,loop=0).is_set()
     
+    
     def is_connected(self):
         return self.is_active()
+    
     
     async def wait_till_active(self, timeout=None):
         #self.station._print()
         #print({'loop': id(self.loop), 'out_loop': id(self.out_loop), 'context': id(asyncio.get_event_loop())})
         event = self.station.get_event('active',0)
         await asyncio.wait_for(event.wait(), timeout)
-        
+    
     @property
     def wait_till_connected(self):
         return self.wait_till_active
@@ -454,6 +541,7 @@ class Connection:
     def broadcast_event(self, event_type, value):
         self.station.broadcast('event', ConnectionEvent(self.id, event_type, value))
     
+    
     def stop(self):
         f = self.futures['stop']
         if f is not None and not f.done():
@@ -467,6 +555,7 @@ class Connection:
         #if f is not None and not f.done():
         #    return
         self._stopped = True
+        self.station.broadcast('_stop_initiated')
         if self.conn is None: 
             return
         fstart = self.futures['start']
@@ -499,14 +588,19 @@ class Connection:
         conn = conn if conn is not None else self.conn
         if conn is None:
             pass
-        elif not self.signalr:
+        elif self.signalr:
+            safeTry(conn.close)
+            #self.hub = None
+        elif self.socketio:
+            await safeAsyncTry(conn.disconnect)
+            # this must be done here as socketio has not callback on user initiated disconnect
+            await self._socket_recv_queue.put(websockets.ConnectionClosed(-1, 'socketio ws closed'))
+        else:
             if hasattr(conn, 'ws_client'):
                 try: await conn.__aexit__(*sys.exc_info())
                 except Exception as e: logger.exception(e)
             #self.socket = None
-        else:
-            safeTry(conn.close)
-            #self.hub = None
+
         
     @property
     def rate_limit(self):
@@ -528,6 +622,7 @@ class Connection:
                                  loop=self.loop, 
                                  f=self._throttle)
         self._rate_limit = value
+    
     
     def __str__(self):
         return self.name

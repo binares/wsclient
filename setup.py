@@ -10,6 +10,7 @@ setup(
    install_requires=[
        'requests>=2.18.4',
        'websockets>=4.0.1',
+       'python-socketio[asyncio_client]>=4.6.0', # tested 4.6
        'fons @ git+https://github.com/binares/fons.git',
    ],
 )

@@ -103,6 +103,9 @@ class WSClient(metaclass=WSMeta):
         # it is necessary to list *all* methods to avoid KeyError
         # during signalr_aio message handling
         'hub_methods': [],
+        'socketio': False,
+        # only event-messages that are listed here are forwarded to .handle
+        'event_names': [], # if socketio is enabled
         'connect_timeout': None,
         'reconnect_try_interval': 30,
         # if current_time > last_message_recived_timestamp + recv_timeout,

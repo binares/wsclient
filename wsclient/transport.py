@@ -294,7 +294,7 @@ class Transport:
              False : don't wait
              'default', True->'default', None, of type int/float: timeout to wait
              'return': doesn't wait, but returns the waiter
-             if signalr is enabled then id system is probably not implementable (leave wait to False).
+             if signalr/socketio is enabled then id system is probably not implementable (leave wait to False).
            :param id:
              custom id to be attached to the waiter. in that case user must forward the response to
              the waiter manually (e.g. through .handle)
@@ -344,16 +344,23 @@ class Transport:
         wait = 'default' if wait is True else wait
         add_waiter = wait is not False
         return_waiter = wait in ('return','return-waiter','return_waiter','return waiter')
-
-        if cnx.url and send: pass
-        elif not add_waiter or not return_waiter: 
-            return None
-        else:
-            f = asyncio.Future()
-            f.set_result(None)
-            return f
+        
+        def _return():
+            if not add_waiter or not return_waiter: 
+                return None
+            else:
+                f = asyncio.Future()
+                f.set_result(None)
+                return f
+        
+        if not cnx.url or not send:
+            return _return()
         
         packs = self.wc.encode(rq, sub)
+        # WSClient.encode should return `None` if this specific request is not meant to be sent
+        if packs is None:
+            return _return()
+        
         if not isinstance(packs, Merged):
             packs = [packs]
         single = (len(packs) == 1)

@@ -385,9 +385,12 @@ class Subscription(Request):
         return asyncio.ensure_future(self.wc.tp.send(self, sub=False))
         
     def is_active(self):
+        return bool(self.state) # `active/inactive` events aren't set immediately, use `state` instead
+    
+    def _is_active(self):
         return self.station.get_event('active', 0, loop=0).is_set()
     
-    def is_active2(self):
+    def _is_active2(self):
         return not self.station.get_event('inactive', 0, loop=0).is_set()
     
     async def wait_till_active(self, timeout=None):
