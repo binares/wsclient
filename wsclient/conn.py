@@ -148,7 +148,8 @@ class Connection:
             if _headers is not None:
                 headers_from_url.update(_headers)
             url = url['url']
-        logger.debug("{} url: {}".format(self.name, url))
+        sfx = ' url: {}'.format(url) if url!='' else ' url empty'
+        logger.debug("{}{}".format(self.name, sfx))
         
         extra_headers = self.extra_headers
         if hasattr(extra_headers,'__call__'):

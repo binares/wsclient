@@ -61,7 +61,7 @@ class SubscriptionHandler:
         return pushed
         
         
-    def add_subscription(self, params):
+    def add_subscription(self, params, *, dependants=[]):
         """:param params: dict or id_tuple"""
         if hasattr(params, '__iter__') and not isinstance(params, dict):
             params = self.wc.cis.parse_id_tuple(params)
@@ -77,9 +77,8 @@ class SubscriptionHandler:
         merge = False
         
         if self.wc.cis.has_merge_option(channel):
-            merge_index = self.wc.cis.get_value(channel, 'merge_index')
-            if merge_index is None: merge_index = 1
-            #elif merge_index <= 1: raise ValueError(merge_index)
+            merge_index = self.wc.cis.get_value(channel, 'merge_index', 1)
+            #if merge_index <= 1: raise ValueError(merge_index)
             if isinstance(id_tuple[merge_index], Merged):
                 merge = True
         elif any(isinstance(x, Merged) for x in id_tuple): 
@@ -112,8 +111,10 @@ class SubscriptionHandler:
     
         for _params in params_list:
             if self.is_subscribed_to(_params):
-                _id_t = self.wc.cis.create_id_tuple(_params)
-                tlogger0.debug('{} - already subbed to: {}'.format(self.wc.name, _id_t))
+                _s = self.get_subscription(_params)
+                if not dependants:
+                    _s.independently_called = True
+                tlogger0.debug('{} - already subbed to: {}'.format(self.wc.name, _s.id_tuple))
             else:
                 not_subbed.append(_params)
                 
@@ -144,13 +145,19 @@ class SubscriptionHandler:
         subs = [] 
         
         for i,_params in enumerate(not_subbed):
-            s = Subscription(_params, self.wc, cnx)
+            s = Subscription(_params, self.wc, cnx, dependants=dependants)
             self.subscriptions.append(s)
             subs.append(s)
         
         if merge:
-            s = SubscriptionMerger(channel, self.wc, cnx, subs)
-            
+            s = SubscriptionMerger(channel, self.wc, cnx, subs, dependants=dependants)
+        
+        dependencies = self.wc.get_dependencies(s)
+        for dep in dependencies:
+            if not self.is_subscribed_to(dep):
+                tlogger.debug('{} - adding provider sub {} for {}'.format(self.wc.name, dep, s.id_tuple))
+                self.add_subscription(dep, dependants=[s])
+        
         if self.wc.tp._thread.isAlive() and self.wc.is_active():
             tlogger0.debug('{} - ensuring sub {} push future.'.format(self.wc.name, s.id_tuple))
             return s.push()
@@ -180,18 +187,36 @@ class SubscriptionHandler:
         if not self.wc.cis.has_unsub_option(s.channel):
             raise SubscriptionError("{} - '{}' doesn't support unsubscribing.".format(
                                     self.wc.name, s.channel))
+        if s.dependants or s.is_merger() and any(_s.dependants for _s in s.subs):
+            raise SubscriptionError("{} - '{}' cannot be removed because it has dependants.".format(
+                                    self.wc.name, s.id_tuple))
 
         self.release_uid(s.uid)
         if s.is_merger():
             self.release_uid(_s.uid for _s in s.subscriptions)
         self.change_subscription_state(s, 0)
+        s.independently_called = False
         
         id_tuples = [s.id_tuple] if not s.is_merger() else [_s.id_tuple for _s in s.subscriptions]
         for id_tuple in id_tuples:
             try: s_index = next(_i for _i,_s in enumerate(self.subscriptions) if _s.id_tuple == id_tuple)
             except StopIteration: continue
             else: del self.subscriptions[s_index]
-
+        
+        providers = self.find_provider_subs(s)
+        for p in providers:
+            p.remove_dependant(s)
+        
+        for p in providers:
+            if not p.dependants and not p.independently_called:
+                try:
+                    tlogger.debug("{} - removing provider sub {} of {}".format(self.wc.name, p.id_tuple, s.id_tuple))
+                    self.remove_subscription(p)
+                except Exception as e:
+                    logger.error("{} - could not remove provider sub {} of {}: {}".format(
+                                 self.wc.name, p.id_tuple, s.id_tuple, repr(e)))
+                    logger.exception(e)
+        
         if self.wc.is_active():
             return s.unsub()
         
@@ -213,8 +238,12 @@ class SubscriptionHandler:
             return None
         else:
             return self.max_subscriptions - len(self.subscriptions)
-        
-        
+    
+    
+    def find_provider_subs(self, s):
+        return [_s for _s in self.subscriptions if s in _s.dependants]
+    
+    
     def find_available_connection(self, params, create=False, count=1):
         channel = params['_']
         is_sub = self.wc.cis.is_subscription(channel)
@@ -283,7 +312,11 @@ class SubscriptionHandler:
             self.change_subscription_state(uid, 0)
     
     
-    def change_subscription_state(self, x, state, cnx_active=False):
+    def change_subscription_state(self, x, state, cnx_active=False, provider_active=True):
+        """
+        :param cnx_active: if True, positive state can only be assigned if subscription's connection is active
+        :param provider_active: -||- all subscription's provider subs are active
+        """
         #TODO: force state to 0 if not self.is_running() ?
         s = self.get_subscription(x)
         prev_state = s.state
@@ -292,6 +325,11 @@ class SubscriptionHandler:
         
         if state and cnx_active and (s.cnx is None or not s.cnx.is_active()):
             return
+        
+        if state and provider_active:
+            providers = self.find_provider_subs(s)
+            if not all(p.state for p in providers):
+                return
         
         s.state = state
         
@@ -312,8 +350,13 @@ class SubscriptionHandler:
         subs = [s] if not s.is_merger() else s.subscriptions
         for _s in subs:
             data_ops(_s)
-            
-            
+        
+        # Dependent subscription is disabled automatically, but enabling is left to user side. 
+        if not state:
+            for dep in s.dependants:
+                self.change_subscription_state(dep, 0)
+    
+    
     def create_uid(self, reserve=True):
         uid = next(x for x,v in self.uids.items() if not v)
         if reserve:
@@ -353,7 +396,7 @@ class SubscriptionHandler:
     
     
 class Subscription(Request):
-    def __init__(self, params, wrapper, cnx):
+    def __init__(self, params, wrapper, cnx, *, dependants=[]):
         """:type wrapper: WSClient
            :type cnx: Connection"""
         super().__init__(params, wrapper, cnx)
@@ -364,6 +407,10 @@ class Subscription(Request):
                                 loops={-1: self.wc._loop, 
                                         0: self.wc.loop})
         self.state = self.wc.cis.get_default_subscription_state(self.channel)
+        self.dependants = []
+        self.independently_called = not dependants # this can also be True if it does have dependants
+        for s in dependants:
+            self.add_dependant(s)
         
     def add_merger(self, merger):
         if self.is_active():
@@ -373,6 +420,18 @@ class Subscription(Request):
         
     def remove_merger(self, merger):
         merger.remove(self)
+    
+    def add_dependant(self, s):
+        if s not in self.dependants:
+            self.dependants.append(s)
+            return True
+        return None
+    
+    def remove_dependant(self, s):
+        if s in self.dependants:
+            self.dependants.remove(s)
+            return True
+        return None
     
     def push(self):
         if self.merger is not None:
@@ -423,7 +482,7 @@ class Subscription(Request):
     
     
 class SubscriptionMerger(Subscription):
-    def __init__(self, channel, wrapper, cnx, subs=[]):
+    def __init__(self, channel, wrapper, cnx, subs=[], *, dependants=[]):
         """:type wrapper: WSClient
            :type cnx: Connection"""
         id_tuple_kw = wrapper.cis._fetch_subscription_identifiers(channel)
@@ -440,7 +499,7 @@ class SubscriptionMerger(Subscription):
         self.merge_param = id_tuple_kw[self.merge_index]
         self.subscriptions = []
         
-        super().__init__(params, wrapper, cnx)
+        super().__init__(params, wrapper, cnx, dependants=dependants)
         
         for s in subs:
             self.add(s)

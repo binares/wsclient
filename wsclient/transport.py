@@ -318,20 +318,21 @@ class Transport:
         #Forward to thread
         if not self._is_in_thread_loop():
             fut = asyncio.Future()
-            await self.send_queue.put((fut,rq,wait,id,cnx,sub))
+            await self.send_queue.put( (fut, rq, wait, id, cnx, sub) )
             return await fut
         
         params = rq.params
         cnx = rq.cnx
         channel = rq.channel
         cnxi = self.wc.cm.cnx_infs[cnx]
-        send = self.wc.cis.get_value(channel,'send')
+        send = self.wc.cis.get_value(channel ,'send')
+        drop =  self.wc.cis.get_value(channel, 'drop_unused_connection', not send)
         
         if not cnx.is_running() and (sub is None or sub):
             try: cnx.start()
             except RuntimeError: pass
             await cnx.wait_till_active(cnx.connect_timeout)
-        elif (sub is not None and not sub) and cnx.url and not send:
+        elif (sub is not None and not sub) and cnx.url and drop:
             # Due to param variance difference old connections would not satisfy
             # the new variance, and would remain unused
             # if rq.is_merger() and not any(_s.merger is not rq and _s.cnx is cnx

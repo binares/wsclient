@@ -82,6 +82,8 @@ class WSClient(metaclass=WSMeta):
         # Activate subscription when receives acknowledgement.
         # Set it to "on_cnx_activation" for the sub to be activated after its cnx is activated
         'auto_activate': True,
+        # if connection has no subscriptions left, drop it; if left to None then = `not send`
+        'drop_unused_connection': None, 
     }
     # If "is_private" is set to True, .sign() is called on the specific output to server
 
@@ -396,8 +398,14 @@ class WSClient(metaclass=WSMeta):
         
     def delete_data(self, subscription, prev_state):
         """Override this method"""
-        
-        
+    
+    
+    def get_dependencies(self, subscription):
+        """:returns: list of subscriptions (id_tuple, dict, ..) that are pre-required for `subscription`
+        Override this method"""
+        return []
+    
+    
     @staticmethod
     def merge(param_arr):
         if isinstance(param_arr, (str, dict)) or not hasattr(param_arr, '__iter__'):
@@ -477,6 +485,13 @@ class WSClient(metaclass=WSMeta):
                 if cpc.startswith('m$'): cpc = cpc[2:]
                 ch_values['cnx_params_converter'] = getattr(self, cpc)
     
+    
+    def subscribe_to(self, params):
+        return self.sh.add_subscription(params)
+    
+    def unsubscribe_to(self, x):
+        return self.sh.remove_subscription(x)
+    
     @property
     def subscriptions(self):
         return self.sh.subscriptions[:]
@@ -496,17 +511,11 @@ class WSClient(metaclass=WSMeta):
     def verify_has(self):
         return self.cis.verify_has
     @property
-    def subscribe_to(self):
-        return self.sh.add_subscription
-    @property
-    def unsubscribe_to(self):
-        return self.sh.remove_subscription
-    @property
     def sub_to(self):
-        return self.sh.add_subscription
+        return self.subscribe_to
     @property
     def unsub_to(self):
-        return self.sh.remove_subscription
+        return self.unsubscribe_to
     @property
     def is_subscribed_to(self):
         return self.sh.is_subscribed_to

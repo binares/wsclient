@@ -1,7 +1,10 @@
 from fons.dict_ops import deep_get
 from fons.event import Station
+import fons.log as _log
 
 from .conn import Connection
+
+logger,logger2,tlogger,tloggers,tlogger0 = _log.get_standard_5(__name__)
 
 # How to integrate both url and socket sub registration?
 # When unsubbing remove it from cnxi's url_factory, which
@@ -37,6 +40,7 @@ class ConnectionManager:
         if cnx is not None:
             cnx.stop()
             if delete and cnx.id in self.connections:
+                tlogger0.debug('{} - removing connection {}'.format(self.wc.name, cnx.id))
                 del self.connections[cnx.id]
             if delete and cnx in self.cnx_infs:
                 del self.cnx_infs[cnx]
