@@ -4,9 +4,12 @@ __pycache__/
 *$py.class
 
 # Eclipse
-.settings/
+/.settings/
 /.project
 /.pydevproject
+
+# Vscode
+/.vscode/
 
 # C extensions
 *.so
