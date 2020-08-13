@@ -3,6 +3,7 @@ from fons.event import Station
 import fons.log as _log
 
 from .conn import Connection
+from .errors import ConnectionLimitExceeded
 
 logger,logger2,tlogger,tloggers,tlogger0 = _log.get_standard_5(__name__)
 
@@ -23,6 +24,10 @@ class ConnectionManager:
                                name=self.wc.name+'[CM][Station]')
     
     def add_connection(self, config, start=False):
+        cur_len = len(self.connections)
+        if self.wc.max_total_connections is not None and cur_len >= self.wc.max_total_connections:
+            raise ConnectionLimitExceeded('{} - number of connections ({}) has reached its limit ({})'
+                                          .format(self.wc.name, cur_len, self.wc.max_total_connections))
         cnx = Connection(**config)
         self.connections[cnx.id] = cnx
         self.cnx_infs[cnx] = ConnectionInfo(self.wc, cnx)
@@ -67,8 +72,8 @@ class ConnectionInfo:
            :type cnx: Connection"""
         self.wc = wc
         self.cnx = cnx
-        self.max_subscriptions = (self.wc.sh.max_subs_per_socket 
-                                    if self.wc.sh.max_subs_per_socket is not None else 
+        self.max_subscriptions = (self.wc.max_subscriptions_per_connection
+                                    if self.wc.max_subscriptions_per_connection is not None else
                                   100*1000)
         self.authenticated = False
         

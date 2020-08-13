@@ -95,8 +95,12 @@ class WSClient(metaclass=WSMeta):
     #        "is_private": False,
     # }
     channels = {}
-
+    
     max_total_subscriptions = None
+    max_total_connections = None
+    max_subscriptions_per_connection = None
+    # the interval between pushing (sending) individual subscriptions to the server
+    subscription_push_rate_limit = None
     
     connection_defaults = {
         # change hub_name and hub_methods only if signalr is set to True
@@ -132,9 +136,6 @@ class WSClient(metaclass=WSMeta):
         # the socket if no pong frame is received within that time
         'ping_timeout': 5,
         'poll_interval': 0.05,
-        'max_subscriptions': None,
-        # the interval between pushing (sending) individual subscriptions to the server
-        'subscription_push_rate_limit': None,
     }
     connection_profiles = {}
     

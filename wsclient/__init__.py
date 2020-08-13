@@ -1,4 +1,4 @@
-__version__ = '0.2.0'
+__version__ = '0.3.0'
 __author__ = 'binares'
 
 '''
@@ -13,4 +13,5 @@ from .conn import Connection, ConnectionEvent
 from .base import WSClient
 from .merged import Merged
 from .transport import set_sockets_per_thread
-from .errors import (WSError, SubscriptionError, SubscriptionLimitExceeded)
+from .errors import (
+    WSError, SubscriptionError, SubscriptionLimitExceeded, ConnectionLimitExceeded)

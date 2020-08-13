@@ -18,15 +18,9 @@ logger,logger2,tlogger,tloggers,tlogger0 = _log.get_standard_5(__name__)
 
 
 class SubscriptionHandler:
-    def __init__(self, wrapper, *,
-                 max_connections=None, max_subscriptions=None, max_subs_per_socket=None,
-                 subscription_push_rate_limit=None):
+    def __init__(self, wrapper):
         """:type wrapper: WSClient"""
         self.wc = wrapper
-        self.max_connections = max_connections
-        self.max_subscriptions = max_subscriptions
-        self.max_subs_per_socket = max_subs_per_socket
-        self.subscription_push_rate_limit = subscription_push_rate_limit
         
         self.subscriptions = []
         
@@ -49,13 +43,15 @@ class SubscriptionHandler:
                 mergers.add(s.merger)
                 s = s.merger
             tlogger0.debug('{} - pushing {} to cnx <{}>'.format(self.wc.name, s, s.cnx.id))
-            try: await s.push()
+            try:
+                await s.push()
             except Exception as e:
                 logger2.error('{} - could not push {} to cnx <{}>'.format(self.wc.name, s, s.cnx.id))
                 logger.exception(e)
-            else: pushed.append(s)
-            if self.subscription_push_rate_limit is not None:
-                await asyncio.sleep(self.subscription_push_rate_limit)
+            else:
+                pushed.append(s)
+            if self.wc.subscription_push_rate_limit:
+                await asyncio.sleep(self.wc.subscription_push_rate_limit)
         tlogger.debug('{} - subscriptions pushed'.format(self.wc.name))
         
         return pushed
@@ -234,10 +230,9 @@ class SubscriptionHandler:
     
     
     def get_total_free_subscription_slots(self):
-        if self.max_subscriptions is None:
-            return None
-        else:
-            return self.max_subscriptions - len(self.subscriptions)
+        if self.wc.max_total_subscriptions is not None:
+            return self.wc.max_total_subscriptions - len(self.subscriptions)
+        return None
     
     
     def find_provider_subs(self, s):

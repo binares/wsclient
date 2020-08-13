@@ -8,3 +8,7 @@ class SubscriptionError(WSError):
 
 class SubscriptionLimitExceeded(SubscriptionError):
     pass
+
+
+class ConnectionLimitExceeded(SubscriptionError):
+    pass
