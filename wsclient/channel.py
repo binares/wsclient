@@ -116,11 +116,12 @@ class ChannelsInfo:
                           'ping_timeout', 'poll_interval', 'rate_limit', 
                           'throttle_logging_level',]
             }, #queue_maxsizes = self.wc.queue_maxsizes,
-               recv_queue = self.wc.tp.recv_queue, 
-               event_queue = self.wc.tp._event_queue,
-               name_prefix = self.wc.name+'[cnx]',
-               loop = self.wc._loop, 
-               out_loop = self.wc.loop
+            recv_queue = self.wc.tp.recv_queue, 
+            event_queue = self.wc.tp._event_queue,
+            name_prefix = self.wc.name+'[cnx]',
+            loop = self.wc._loop, 
+            out_loop = self.wc.loop,
+            verbose = self.wc.verbose,
         )
         
     def get_value(self, _, keywords, default=None, set='channel'):

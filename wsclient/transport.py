@@ -104,7 +104,7 @@ class Transport:
         self.futures['start'] = asyncio.Future()
         f1 = f2 = None
         try:
-            logger.debug("Starting '{}'".format(self.wc.name))
+            self.wc.log('starting')
             self.station.broadcast('running')
             self.station.broadcast('stopped', op='clear')
     
@@ -141,16 +141,13 @@ class Transport:
         _loop = asyncio.get_event_loop()
         
         # .send() is rooted via .send_queue
-        async def _send(future,params,wait,id,cnx,sub):
+        async def _send(future, params, wait, id, cnx, sub):
             """:type future: asyncio.Future"""
-            try: r = await self.send(params,wait,id,cnx,sub)
+            try: r = await self.send(params, wait, id, cnx, sub)
             except Exception as e:
-                tloggers.error('{} - Thread .send() error occurred: {}' \
-                               .format(self.wc.name, str(e)))
+                self.wc.log('thread .send() error occurred: {}'.format(repr(e)), 'ERROR')
                 loop.call_soon_threadsafe(
                     functools.partial(future.set_exception, e))
-                await asyncio.sleep(1)
-                tloggers.error('future is_done(): {}'.format(future.done()))
             else: 
                 loop.call_soon_threadsafe(
                     functools.partial(future.set_result, r))
@@ -192,12 +189,12 @@ class Transport:
             self.station.broadcast('active', op='clear')
             self.station.broadcast('inactive')
             self.wc.broadcast_event('active', 0)
-            tlogger.debug('{} - stopped'.format(self.wc.name))
+            self.wc.log('stopped')
         
     
     async def process_responses(self):
         # Process received results from connections. This runs in the main loop (self.loop)
-        tlogger.debug('{} - starting response processing'.format(self.wc.name))
+        self.wc.log2('starting response processing')
         iscoro = asyncio.iscoroutinefunction(self.wc.handle)
         recv = None
         
@@ -247,7 +244,7 @@ class Transport:
     
     async def process_events(self):
         # Process events from connections. This runs in self._thread
-        tlogger.debug('{} - starting event processing'.format(self.wc.name))
+        self.wc.log2('starting event processing')
         activation_count = defaultdict(int)
         
         while not self.wc._closed:
@@ -402,9 +399,12 @@ class Transport:
                 send_separately = deep_get(seq,'send_separately')
                 set_authenticated = deep_get(seq,'set_authenticated',return2=True)
                 
-                tlogger0.debug(['({})'.format(i), params, is_private, auth_required, via_url,
-                                each_time, send_separately, '\n', takes_input, set_authenticated,
-                                cnxi.authenticated])
+                self.wc.log2('do_auth || i: {i} params: {params}, is_private: {is_private} auth_required: {auth_required} '\
+                             'via_url: {via_url} each_time: {each_time} send_separately: {send_separately} '\
+                             'takes_input: {takes_input} set_authenticated: {set_authenticated} cnxi.authenticated: {authenticated}'
+                             .format(i=i, params=params, is_private=is_private, auth_required=auth_required, via_url=via_url,
+                                     each_time=each_time, send_separately=send_separately, takes_input=takes_input,
+                                     set_authenticated=set_authenticated, authenticated=cnxi.authenticated))
             
                 if (is_private and auth_required is None or auth_required) and not via_url:
                     _aInp = [out] if takes_input else []
@@ -490,14 +490,12 @@ class Transport:
     async def wait_on_waiter(self, waiter, timeout='default'):
         if timeout == 'default':
             timeout = self.wc.connection_defaults['waiter_timeout']
-        tlogger.debug('{} - waiting on waiter {}, timeout: {}'.format(
-            self.wc.name, waiter.message_id, timeout))
+        self.wc.log2('waiting on waiter {}, timeout: {}'.format(waiter.message_id, timeout))
         try: r = await asyncio.wait_for(waiter, timeout)
         except asyncio.TimeoutError as e:
-            tloggers.error('{} - timeout occurred on waiter {}'.format(
-                self.wc.name, waiter.message_id))
+            self.wc.log2('timeout occurred on waiter {}'.format(waiter.message_id), 'ERROR')
             raise e
-        tlogger.debug('{} - {} wait finished'.format(self.wc.name, waiter.message_id))
+        self.wc.log2('{} wait finished'.format(waiter.message_id))
         return r
 
 

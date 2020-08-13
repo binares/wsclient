@@ -45,7 +45,7 @@ class ConnectionManager:
         if cnx is not None:
             cnx.stop()
             if delete and cnx.id in self.connections:
-                tlogger0.debug('{} - removing connection {}'.format(self.wc.name, cnx.id))
+                self.wc.log('removing connection <{}>'.format(cnx.id))
                 del self.connections[cnx.id]
             if delete and cnx in self.cnx_infs:
                 del self.cnx_infs[cnx]

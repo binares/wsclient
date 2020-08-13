@@ -37,7 +37,7 @@ class Connection:
                  ping_as_message=False, rate_limit=None, poll_interval=None,
                  queue_maxsizes={}, recv_queue=None, event_queue=None,
                  id=None, name_prefix=None, loop=None, out_loop=None, throttle_logging_level=0,
-                 extra_headers=None):
+                 extra_headers=None, verbose=0):
         """
         :param url: str or (coroutine) function that returns str
         :param handle: (sync) function or list of functions (or None)
@@ -55,6 +55,7 @@ class Connection:
         self.extra_headers = extra_headers
         self.handle = handle
         self.on_activate = on_activate
+        self.verbose = verbose
         #if id is None, returns free connection number (as str)
         self.id = create_name(id, None, registry=_CONNECTION_IDS)
         #default_name is used (and int added to that if already taken)
@@ -133,7 +134,7 @@ class Connection:
     
     async def _connect(self):
         suffix = ' (socketio)' if self.socketio else (' (signalr)' if self.signalr else '')
-        logger.debug("{} - connecting{}".format(self.name, suffix))
+        self.log("connecting{}".format(suffix))
         params = {}
         
         url = self.url
@@ -148,8 +149,8 @@ class Connection:
             if _headers is not None:
                 headers_from_url.update(_headers)
             url = url['url']
-        sfx = ' url: {}'.format(url) if url!='' else ' url empty'
-        logger.debug("{}{}".format(self.name, sfx))
+        url_msg = 'url: {}'.format(url) if url!='' else 'url empty'
+        self.log(url_msg)
         
         extra_headers = self.extra_headers
         if hasattr(extra_headers,'__call__'):
@@ -173,7 +174,7 @@ class Connection:
         else:
             await self._connect_ordinary(url, params)
         
-        logger.debug("{} - connection established".format(self.name))
+        self.log("connection established")
         self.connected_url = url
         self.connected_ts = time.time()
         #self.socket.settimeout(self.timeout)
@@ -181,7 +182,7 @@ class Connection:
     
     async def _connect_ordinary(self, url, params={}):
         self.conn = websockets.connect(url, **params)
-        self.socket = await self.conn.__aenter__()
+        self.socket = await self.conn.__aenter__() # this also execs logging.basicConfig
         q = self._socket_recv_queue
         
         async def recv_loop():
@@ -222,10 +223,10 @@ class Connection:
             try:
                 await signalr_fut
             except websockets.ConnectionClosed as e:
-                logger.debug('{} - signalr socket has crashed'.format(self.name))
+                self.log('signalr socket has crashed')
                 await q.put(e)
             else:
-                logger.debug('{} - signalr socket has been closed'.format(self.name))
+                self.log('signalr socket has been closed')
                 await q.put(websockets.ConnectionClosed(-1, 'signalr ws closed'))
                 
         self.futures['signalr_wait'] = asyncio.ensure_future(wait_on_signalr_future())
@@ -249,13 +250,13 @@ class Connection:
         
         @sio.event
         async def connect_error(*args):
-            logger.debug('{} - socketio encountered connect error'.format(self.name))
+            self.log('socketio encountered connect error')
             await q.put(websockets.ConnectionClosed(-1, 'socketio connect error'))
         
         # This isn't executed when user itself evokes sio.disconnect (or here Connection.stop())
         @sio.event
         async def disconnect():
-            logger.debug('{} - socketio connection has crashed'.format(self.name))
+            self.log('socketio connection has crashed')
             await q.put(websockets.ConnectionClosed(-1, 'socketio ws crashed'))
         
         await sio.connect(url, transports='websocket')
@@ -314,7 +315,7 @@ class Connection:
     async def _start(self):
         fstop = self.futures['stop']
         if fstop is not None and not fstop.done():
-            tlogger0.debug("{} - waiting till 'stop' fut done".format(self.name))
+            self.log2("waiting till 'stop' fut done")
             await fstop
 
         self.station.broadcast_multiple(
@@ -365,6 +366,8 @@ class Connection:
                     logger.error(result)
                     logger.exception(e)
                 else:
+                    if self.verbose and self.verbose >= 3:
+                        self.log3('received:\n{}'.format(r))
                     if self.handle is not None:
                         handlers = self.handle if hasattr(self.handle, '__iter__') else [self.handle]
                         for handle in handlers:
@@ -416,7 +419,7 @@ class Connection:
     def _verify_recv_timeout(self):
         if self.connected_url and self.recv_timeout is not None and not self._ignore_recv_ts and \
                 self.last_recv_ts is not None and time.time() - self.last_recv_ts > self.recv_timeout:
-            logger2.error('{} - recv timeout occurred. Reconnecting.'.format(self.name))
+            self.log('recv timeout occurred. Reconnecting.', 'ERROR')
             asyncio.ensure_future(self._exit_conn(self.conn))
             #To force the current recv to complete itself (if not already done)
             self._socket_recv_queue.put_nowait(_heartbeat)
@@ -426,7 +429,7 @@ class Connection:
     async def _on_websocket_error(self):
         self._ignore_recv_ts = True
         if self._stopped: return
-        logger2.debug("{}'s websocket has crashed. Reconnecting.".format(self.name))
+        self.log("websocket has crashed. Reconnecting.", logger=logger2)
         self.station.broadcast('active', op='clear')
         self.broadcast_event('socket', 0)
         await self._safe_activate(self.connect_timeout)
@@ -460,7 +463,7 @@ class Connection:
     async def _send(self, message, dump=True):
         await self.throttle()
         await self.wait_till_active(self.connect_timeout)
-        tlogger.debug('{} - sending: {}'.format(self.name, message))
+        self.log('sending: {}'.format(message))
         if self.signalr:
             self.hub.server.invoke(*message)
         elif self.socketio:
@@ -477,7 +480,7 @@ class Connection:
             last_ts = next((x for x in (self._last_ping_ts, self.last_recv_ts) if x), 0)
         
         if self.ping_after is None or time.time() > last_ts + self.ping_after:
-            tlogger.debug('{} - sending ping'.format(self.name))
+            self.log2('sending ping')
             if self.ping_as_message:
                 message = self.ping_func()
                 #message will be json encoded
@@ -561,17 +564,17 @@ class Connection:
             return
         fstart = self.futures['start']
         fping = self.futures['ping']
-        tlogger0.debug('{} - stopping'.format(self.name))
+        self.log2('stopping')
         await self._socket_recv_queue.put(_stop_command)
         if self.ping_ticker is not None:
             await self.ping_ticker.close()
             if not fping.done():
-                tlogger0.debug('{} - waiting on "ping" future'.format(self.name))
+                self.log2('waiting on "ping" future')
                 await fping
-        tlogger0.debug('{} - closing socket'.format(self.name))
+        self.log2('closing socket')
         await self._exit_conn()
         if not fstart.done():
-            tlogger0.debug('{} - waiting on "start" future'.format(self.name))
+            self.log2('waiting on "start" future')
             await fstart
         self.conn = None
         self.hub = None
@@ -582,7 +585,7 @@ class Connection:
              {'_': 'started', 'op': 'clear'},]
         )
         self.broadcast_event('running', 0)
-        tlogger.debug('{} stopped'.format(self.name))
+        self.log('stopped')
         
         
     async def _exit_conn(self, conn=None):
@@ -623,6 +626,30 @@ class Connection:
                                  loop=self.loop, 
                                  f=self._throttle)
         self._rate_limit = value
+    
+    
+    def _log(self, msg, level='DEBUG', logger=logger, add_name=True):
+        if not isinstance(msg, Exception):
+            if add_name:
+                msg = '{} - {}'.format(self.name, msg)
+            logger.log(_log.level_to_int(level), msg)
+        else:
+            logger.exception(msg)
+    
+    
+    def log(self, msg, level='DEBUG', logger=logger, add_name=True):
+        if self.verbose and self.verbose >= 1:
+            self._log(msg, level, logger, add_name)
+    
+    
+    def log2(self, msg, level='DEBUG', logger=logger, add_name=True):
+        if self.verbose and self.verbose >= 2:
+            self._log(msg, level, logger, add_name)
+    
+    
+    def log3(self, msg, level='DEBUG', logger=logger, add_name=True):
+        if self.verbose and self.verbose >= 3:
+            self._log(msg, level, logger, add_name)
     
     
     def __str__(self):

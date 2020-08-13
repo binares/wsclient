@@ -16,9 +16,7 @@ from fons.event import Event
 from fons.reg import create_name
 import fons.log as _log
 
-import functools
 import asyncio
-import copy as _copy
 
 logger,logger2,tlogger,tloggers,tlogger0 = _log.get_standard_5(__name__)
 
@@ -237,8 +235,13 @@ class WSClient(metaclass=WSMeta):
     SubscriptionHandler_cls = SubscriptionHandler
     Transport_cls = Transport
     
+    _verbose = 0 # 1, 2, 3
+    
     
     def __init__(self, config={}):
+        config = config.copy()
+        subscriptions = config.pop('subscriptions', None)  
+        
         for key in config:
             setattr(self, key, deep_update(getattr(self, key, None), config[key], copy=True))
         
@@ -259,9 +262,9 @@ class WSClient(metaclass=WSMeta):
         
         self.reload_urls()
         
-        if getattr(self,'subscriptions',None) is not None:
-            for params in self.subscriptions:
-                self.sh.add_subscription(params)
+        if subscriptions is not None:
+            for params in subscriptions:
+                self.subscribe_to(params)
         
         #self.start.__doc__ = self.tp.start.__doc__    
         #self.send.__doc__ = self.tp.send.__doc__
@@ -493,6 +496,31 @@ class WSClient(metaclass=WSMeta):
     def unsubscribe_to(self, x):
         return self.sh.remove_subscription(x)
     
+    
+    def _log(self, msg, level='DEBUG', logger=logger, add_name=True):
+        if not isinstance(msg, Exception):
+            if add_name:
+                msg = '{} - {}'.format(self.name, msg)
+            logger.log(_log.level_to_int(level), msg)
+        else:
+            logger.exception(msg)
+    
+    
+    def log(self, msg, level='DEBUG', logger=logger, add_name=True):
+        if self.verbose and self.verbose >= 1:
+            self._log(msg, level, logger, add_name)
+    
+    
+    def log2(self, msg, level='DEBUG', logger=logger, add_name=True):
+        if self.verbose and self.verbose >= 2:
+            self._log(msg, level, logger, add_name)
+    
+    
+    def log3(self, msg, level='DEBUG', logger=logger, add_name=True):
+        if self.verbose and self.verbose >= 3:
+            self._log(msg, level, logger, add_name)
+    
+    
     @property
     def subscriptions(self):
         return self.sh.subscriptions[:]
@@ -544,3 +572,12 @@ class WSClient(metaclass=WSMeta):
     @property
     def station(self):
         return self.tp.station
+    @property
+    def verbose(self):
+        return self._verbose
+    @verbose.setter
+    def verbose(self, value):
+        self._verbose = value
+        if getattr(self, 'cm', None) is not None:
+            for cnx in self.cm.connections.values():
+                cnx.verbose = value

@@ -29,8 +29,8 @@ class SubscriptionHandler:
         
 
     async def push_subscriptions(self, cnx=None):
-        cnx_id = cnx.id if cnx is not None else 'null'
-        tlogger.debug('{} - pushing cnx <{}> subscriptions'.format(self.wc.name, cnx_id))
+        cnx_sfx = 'cnx <{}>'.format(cnx.id) if cnx is not None else 'all'
+        self.wc.log('pushing {} subscriptions'.format(cnx_sfx))
         mergers = set()
         pushed = []
         
@@ -42,7 +42,7 @@ class SubscriptionHandler:
                     continue
                 mergers.add(s.merger)
                 s = s.merger
-            tlogger0.debug('{} - pushing {} to cnx <{}>'.format(self.wc.name, s, s.cnx.id))
+            self.wc.log('pushing {} to cnx <{}>'.format(s, s.cnx.id))
             try:
                 await s.push()
             except Exception as e:
@@ -52,7 +52,7 @@ class SubscriptionHandler:
                 pushed.append(s)
             if self.wc.subscription_push_rate_limit:
                 await asyncio.sleep(self.wc.subscription_push_rate_limit)
-        tlogger.debug('{} - subscriptions pushed'.format(self.wc.name))
+        self.wc.log('{} subscriptions pushed'.format(cnx_sfx))
         
         return pushed
         
@@ -110,7 +110,7 @@ class SubscriptionHandler:
                 _s = self.get_subscription(_params)
                 if not dependants:
                     _s.independently_called = True
-                tlogger0.debug('{} - already subbed to: {}'.format(self.wc.name, _s.id_tuple))
+                self.wc.log2('already subbed to: {}'.format(_s.id_tuple))
             else:
                 not_subbed.append(_params)
                 
@@ -137,7 +137,7 @@ class SubscriptionHandler:
             new_params = not_subbed[0]
         
         cnx = self.find_available_connection(new_params, create=True, count=count)
-        tlogger0.debug('{} - {} available cnx <{}>'.format(self.wc.name, params, cnx.id))
+        self.wc.log('{} available cnx <{}>'.format(params, cnx.id))
         subs = [] 
         
         for i,_params in enumerate(not_subbed):
@@ -151,11 +151,10 @@ class SubscriptionHandler:
         dependencies = self.wc.get_dependencies(s)
         for dep in dependencies:
             if not self.is_subscribed_to(dep):
-                tlogger.debug('{} - adding provider sub {} for {}'.format(self.wc.name, dep, s.id_tuple))
+                self.wc.log('adding provider sub {} for {}'.format(dep, s.id_tuple))
                 self.add_subscription(dep, dependants=[s])
         
         if self.wc.tp._thread.isAlive() and self.wc.is_active():
-            tlogger0.debug('{} - ensuring sub {} push future.'.format(self.wc.name, s.id_tuple))
             return s.push()
         
         return True
@@ -183,7 +182,7 @@ class SubscriptionHandler:
         if not self.wc.cis.has_unsub_option(s.channel):
             raise SubscriptionError("{} - '{}' doesn't support unsubscribing.".format(
                                     self.wc.name, s.channel))
-        if s.dependants or s.is_merger() and any(_s.dependants for _s in s.subs):
+        if s.dependants or s.is_merger() and any(_s.dependants for _s in s.subscriptions):
             raise SubscriptionError("{} - '{}' cannot be removed because it has dependants.".format(
                                     self.wc.name, s.id_tuple))
 
@@ -206,7 +205,7 @@ class SubscriptionHandler:
         for p in providers:
             if not p.dependants and not p.independently_called:
                 try:
-                    tlogger.debug("{} - removing provider sub {} of {}".format(self.wc.name, p.id_tuple, s.id_tuple))
+                    self.wc.log("removing provider sub {} of {}".format(p.id_tuple, s.id_tuple))
                     self.remove_subscription(p)
                 except Exception as e:
                     logger.error("{} - could not remove provider sub {} of {}: {}".format(
@@ -270,7 +269,6 @@ class SubscriptionHandler:
         if cfg is None:
             channel = params['_']
             cfg = self.wc.cis.fetch_connection_config(channel, params)
-        #cnx = Connection(**cfg)
         cnx = self.wc.cm.add_connection(cfg)
         return cnx
         
@@ -298,7 +296,7 @@ class SubscriptionHandler:
             return
         try: s = self.get_subscription(uid)
         except ValueError: 
-            logger.warn("{} - uid doesn't exist: {}".format(self.wc.name, uid))
+            self.wc.log2("uid doesn't exist: {}".format(uid), 'WARN')
             return
         auto_activate = self.wc.cis.get_value(s.channel, 'auto_activate')
         if status and auto_activate != 'on_cnx_activation' and auto_activate:
@@ -329,7 +327,7 @@ class SubscriptionHandler:
         s.state = state
         
         if state != prev_state:
-            tlogger0.debug('{} - {}'.format(self.wc.name, s))
+            self.wc.log(s)
         
         def data_ops(s):
             #Fetch necessary data before enabling subscription
