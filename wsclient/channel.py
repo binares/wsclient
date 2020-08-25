@@ -86,7 +86,7 @@ class ChannelsInfo:
         if converter is not None:
             params = converter(params.copy())
             
-        funcs = dict.fromkeys(['handle', 'on_activate', 'ping', 'extra_headers'])
+        funcs = dict.fromkeys(['handle', 'on_activate', 'ping', 'pong', 'extra_headers'])
         _sets = {'extra_headers': 'channel'}
         _as_list = ['handle','on_activate']
         
@@ -113,7 +113,8 @@ class ChannelsInfo:
                 for x in ['signalr', 'hub_name', 'hub_methods', 'socketio', 'event_names',
                           'reconnect_try_interval', 'connect_timeout', 'recv_timeout', 
                           'ping_interval', 'ping_after', 'ping_as_message',
-                          'ping_timeout', 'poll_interval', 'rate_limit', 
+                          'ping_timeout', 'pong_as_message',
+                          'poll_interval', 'rate_limit',
                           'throttle_logging_level', 'unpack_json']
             }, #queue_maxsizes = self.wc.queue_maxsizes,
             recv_queue = self.wc.tp.recv_queue, 

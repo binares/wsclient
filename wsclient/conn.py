@@ -34,7 +34,8 @@ class Connection:
                  socketio=False, event_names=None,
                  reconnect_try_interval=None, connect_timeout=None, recv_timeout=None, 
                  ping_interval=None, ping=None, ping_after=None, ping_timeout=5,
-                 ping_as_message=False, rate_limit=None, poll_interval=None,
+                 ping_as_message=False, pong=None, pong_as_message=True,
+                 rate_limit=None, poll_interval=None,
                  queue_maxsizes={}, recv_queue=None, event_queue=None,
                  id=None, name_prefix=None, loop=None, out_loop=None, throttle_logging_level=0,
                  extra_headers=None, unpack_json=True, verbose=0):
@@ -55,6 +56,14 @@ class Connection:
             which = 'signalr' if signalr else 'socketio'
             raise ValueError('Cannot send raw ping frames if `{}` is set to True. ' \
                              'You could enable `ping_as_message` instead.'.format(which))
+        if pong and not pong_as_message and (signalr or socketio):
+            which = 'signalr' if signalr else 'socketio'
+            raise ValueError('Cannot send raw pong frames if `{}` is set to True. ' \
+                             'You could enable `pong_as_message` instead.'.format(which))
+        if isinstance(ping_as_message, str) and ping_as_message!='dump':
+            raise ValueError(ping_as_message)
+        if isinstance(pong_as_message, str) and pong_as_message!='dump':
+            raise ValueError(pong_as_message)
         self.url = url
         self.extra_headers = extra_headers
         self.handle = handle
@@ -95,6 +104,8 @@ class Connection:
         self.ping_as_message = ping_as_message
         self.ping_timeout = ping_timeout
         self.ping_ticker = None
+        self.pong_func = pong
+        self.pong_as_message = pong_as_message
         
         self.unpack_json = unpack_json
         
@@ -341,7 +352,7 @@ class Connection:
             while not self._stopped:
                 try:
                     #asyncio.wait doesn't cancel the recv task when timeout occurs (.gather does)
-                    done,pending = await asyncio.wait([recv], timeout=self.poll_interval)
+                    done, pending = await asyncio.wait([recv], timeout=self.poll_interval)
                     if recv.done():
                         #raises ConnectionClosed if .conn was closed
                         result = recv.result()
@@ -360,8 +371,11 @@ class Connection:
                     self.last_recv_ts = time.time() 
                     self._ignore_recv_ts = False
                     r = self.decode_response(result)
+                    is_ping = await self.pong(r)
                     self.station.broadcast('empty', op='clear')
                     self.broadcast_event('socket', 'recv')
+                    if is_ping:
+                        continue
                     
                 except websockets.ConnectionClosed:
                     await self._on_websocket_error()
@@ -469,14 +483,15 @@ class Connection:
         return r
     
     
-    def send(self, message, dump=True):
-        return call_via_loop_afut(self._send, (message, dump), loop=self.loop)
+    def send(self, message, dump=True, log=True):
+        return call_via_loop_afut(self._send, (message, dump, log), loop=self.loop)
     
     
-    async def _send(self, message, dump=True):
+    async def _send(self, message, dump=True, log=True):
         await self.throttle()
         await self.wait_till_active(self.connect_timeout)
-        self.log('sending: {}'.format(message))
+        if log:
+            self.log('sending: {}'.format(message))
         if self.signalr:
             self.hub.server.invoke(*message)
         elif self.socketio:
@@ -493,20 +508,37 @@ class Connection:
             last_ts = next((x for x in (self._last_ping_ts, self.last_recv_ts) if x), 0)
         
         if self.ping_after is None or time.time() > last_ts + self.ping_after:
-            self.log2('sending ping')
             if self.ping_as_message:
                 message = self.ping_func()
-                #message will be json encoded
-                await self.send(message)
+                self.log2('sending ping: {}'.format(message))
+                # message will be json encoded
+                await self.send(message, dump=(self.ping_as_message=='dump'), log=False)
             else:
                 args = [self.ping_func()] if self.ping_func is not None else []
-                #message will be converted into bytes (must be str or bytes)
+                self.log2('sending ping{}'.format(': '+str(args[0]) if args else ''))
+                # message will be converted into bytes (must be str or bytes)
                 try: await asyncio.wait_for(self.socket.ping(*args), self.ping_timeout)
                 except asyncio.TimeoutError:
                     await self._socket_recv_queue.put(
                         websockets.ConnectionClosed(-3, 'Ping timeout occurred'))
                 finally:
                     self._last_ping_ts = time.time()
+    
+     
+    async def pong(self, r):
+        if not self.pong_func:
+            return
+        message = self.pong_func(r)
+        if message is None:
+            return
+        
+        self.log2('received ping: {}. sending pong: {}'.format(r, message))
+        if self.pong_as_message:
+            await self.send(message, dump=(self.pong_as_message=='dump'), log=False)
+        else:
+            await self.socket.pong(message)
+        
+        return True # pong was successfully sent
     
     
     async def throttle(self):

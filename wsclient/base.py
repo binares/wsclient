@@ -128,11 +128,15 @@ class WSClient(metaclass=WSMeta):
         # current_time > last_message_received_timestamp + ping_after
         'ping_after': None, #in seconds
         # instead sending as raw bytes (via .ping of connection's socket)
-        # sends the ping as an ordinary message (json decodes and sends it)
-        'ping_as_message': False,
+        # sends the ping as an ordinary message
+        'ping_as_message': False, # if 'dump' then the message is json encoded first
         # Only applies if 'ping_as_message' == False, force crashes-reconnects
         # the socket if no pong frame is received within that time
         'ping_timeout': 5,
+        # accepts received message as first arg, returns either
+        # a) `None` if message was not ping, b) the pong message to be sent back
+        'pong': None,
+        'pong_as_message': True, # if 'dump' then the message is json encoded first
         'poll_interval': 0.05,
         # True, False, 'force' (logs and skips the object if it is not unpackable)
         # ignored if `signalr` or `socketio` is enabled
