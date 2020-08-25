@@ -114,7 +114,7 @@ class ChannelsInfo:
                           'reconnect_try_interval', 'connect_timeout', 'recv_timeout', 
                           'ping_interval', 'ping_after', 'ping_as_message',
                           'ping_timeout', 'poll_interval', 'rate_limit', 
-                          'throttle_logging_level',]
+                          'throttle_logging_level', 'unpack_json']
             }, #queue_maxsizes = self.wc.queue_maxsizes,
             recv_queue = self.wc.tp.recv_queue, 
             event_queue = self.wc.tp._event_queue,

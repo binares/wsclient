@@ -134,6 +134,9 @@ class WSClient(metaclass=WSMeta):
         # the socket if no pong frame is received within that time
         'ping_timeout': 5,
         'poll_interval': 0.05,
+        # True, False, 'force' (logs and skips the object if it is not unpackable)
+        # ignored if `signalr` or `socketio` is enabled
+        'unpack_json': True, 
     }
     connection_profiles = {}
     

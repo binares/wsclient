@@ -37,13 +37,17 @@ class Connection:
                  ping_as_message=False, rate_limit=None, poll_interval=None,
                  queue_maxsizes={}, recv_queue=None, event_queue=None,
                  id=None, name_prefix=None, loop=None, out_loop=None, throttle_logging_level=0,
-                 extra_headers=None, verbose=0):
+                 extra_headers=None, unpack_json=True, verbose=0):
         """
         :param url: str or (coroutine) function that returns str
         :param handle: (sync) function or list of functions (or None)
         :param on_activate: (a)sync function or list of functions (or None)
         :param out_loop: for station events and queues (recv [received] queue, event queue)
         :param extra_headers: (coroutine) function that returns dict
+        :param unpack_json:
+            True, False, 'force' (logs and skips the object if it it is not unpackable)
+            ignored if  `socketio` or `signalr` is enabled
+                            
         """
         if signalr and socketio:
             raise ValueError('`signalr` and `socketio` can\'t be simultaneously True')
@@ -91,6 +95,8 @@ class Connection:
         self.ping_as_message = ping_as_message
         self.ping_timeout = ping_timeout
         self.ping_ticker = None
+        
+        self.unpack_json = unpack_json
         
         self.station = Station(loops = {-1: self.loop, 
                                          0: self.out_loop},
@@ -359,7 +365,7 @@ class Connection:
                     
                 except websockets.ConnectionClosed:
                     await self._on_websocket_error()
-                except json.JSONDecodeError as e:
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
                     dots = '...' if len(result) > 200 else ''
                     logger2.error("{} - non json-decodable response: {}{}"\
                                   .format(self.name, result[:200], dots))
@@ -412,8 +418,15 @@ class Connection:
             return r
         elif self.socketio:
             return r # json.loads(r['data'])
-        else:
+        elif self.unpack_json == 'force':
             return json.loads(r)
+        elif self.unpack_json:
+            try:
+                return json.loads(r)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return r
+        else:
+            return r
     
     
     def _verify_recv_timeout(self):
