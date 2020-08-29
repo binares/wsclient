@@ -146,6 +146,7 @@ class Transport:
             try: r = await self.send(params, wait, id, cnx, sub)
             except Exception as e:
                 self.wc.log('thread .send() error occurred: {}'.format(repr(e)), 'ERROR')
+                self.wc.log(e)
                 loop.call_soon_threadsafe(
                     functools.partial(future.set_exception, e))
             else: 
