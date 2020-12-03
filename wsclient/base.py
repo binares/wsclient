@@ -568,6 +568,9 @@ class WSClient(metaclass=WSMeta):
     def wait_till_subscription_active(self):
         return self.sh.wait_till_subscription_active
     @property
+    def wait_till_subscriptions_active(self):
+        return self.sh.wait_till_subscriptions_active
+    @property
     def get_value(self):
         return self.cis.get_value
     #@property

@@ -6,7 +6,7 @@ README = (HERE / "README.md").read_text()
 
 setup(
    name='wsclient',
-   version='0.3.0',
+   version='0.4.0',
    description='A framework for implementing websocket APIs',
    long_description=README,
    long_description_content_type='text/markdown',

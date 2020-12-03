@@ -1,6 +1,7 @@
 import copy as _copy
 import asyncio
 import functools
+import time
 import datetime
 dt = datetime.datetime
 td = datetime.timedelta
@@ -382,6 +383,23 @@ class SubscriptionHandler:
     async def wait_till_subscription_active(self, x, timeout=None):
         s = self.get_subscription(x)
         await s.wait_till_active(timeout)
+    
+    async def wait_till_subscriptions_active(self, subscriptions):
+        """:param subcriptions: [subscription, ...] or {subcription: timeout, ...}"""
+        timeouts_by_sub = subscriptions
+        if not isinstance(subscriptions, dict):
+            timeouts_by_sub = dict.fromkeys(subscriptions, None)
+        timeouts_by_sub = {self.get_subscription(x): timeout for x, timeout in timeouts_by_sub.items()}
+        started = time.time()
+        while True:
+            not_active = [s for s in timeouts_by_sub if not s.state]
+            if not not_active:
+                break
+            elapsed = time.time() - started
+            exceeded = [s for s in not_active if timeouts_by_sub[s] is not None and elapsed > timeouts_by_sub[s]]
+            if exceeded:
+                raise asyncio.TimeoutError('Subcription(s) {} have exceeded their timeout'.format(exceeded))
+            await asyncio.sleep(0.05)
     
     @property
     def ip(self):
