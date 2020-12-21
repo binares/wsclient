@@ -4,6 +4,12 @@
 # signalr_aio/hubs/_hub.py
 # Stanislav Lazarov
 
+from fons.log import get_standard_5
+
+logger,logger2,tlogger,tloggers,tlogger0 = get_standard_5(__name__)
+
+_METHODS_WARNED = []
+
 
 class Hub:
     def __init__(self, name, connection):
@@ -40,7 +46,12 @@ class HubClient(object):
                 if hub.lower() == self.name.lower():
                     method = inner_data['M']
                     message = inner_data['A']
-                    await self.__handlers[method](message)
+                    if method not in self.__handlers:
+                        if method not in _METHODS_WARNED:
+                            _METHODS_WARNED.append(method)
+                            logger2.error("SIGNALR RECEIVED NON-REGISTERED METHOD: '{}' (message: '{}')".format(method, message))
+                    else:
+                        await self.__handlers[method](message)
 
         connection.received += handle
 
