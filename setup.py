@@ -10,7 +10,7 @@ setup(
    description='A framework for implementing websocket APIs',
    long_description=README,
    long_description_content_type='text/markdown',
-   url='https://github.com/binares/fons',
+   url='https://github.com/binares/wsclient',
    author='binares',
    author_email='binares@protonmail.com',
    license='MIT',
@@ -20,6 +20,6 @@ setup(
        'requests>=2.18.4',
        'websockets>=4.0.1',
        'python-socketio[asyncio_client]>=4.6.0', # tested 4.6
-       'fons>=0.2.1',
+       'fons>=0.3.0',
    ],
 )

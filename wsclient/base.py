@@ -111,7 +111,7 @@ class WSClient(metaclass=WSMeta):
         # only event-messages that are listed here are forwarded to .handle
         'event_names': [], # if socketio is enabled
         'connect_timeout': None,
-        'reconnect_try_interval': 30,
+        'reconnect_try_interval': 30, # when connect fails try again after X seconds
         # if current_time > last_message_recived_timestamp + recv_timeout,
         # it assumes that the connection has been lost, and force crashes-reconnects
         # the socket
@@ -138,6 +138,10 @@ class WSClient(metaclass=WSMeta):
         'pong': None,
         'pong_as_message': True, # if 'dump' then the message is json encoded first
         'poll_interval': 0.05,
+        # max number of requests per second / per seconds of interval
+        'rate_limit': None, # nb_requests or (nb_request, seconds)
+        # logged when rate_limit is hit
+        'throttle_logging_level': 0, # 0 - 50 ('DEBUG' - 'CRITICAL')
         # True, False, 'force' (logs and skips the object if it is not unpackable)
         # ignored if `signalr` or `socketio` is enabled
         'unpack_json': True, 

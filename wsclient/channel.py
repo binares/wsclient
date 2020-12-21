@@ -89,6 +89,7 @@ class ChannelsInfo:
         funcs = dict.fromkeys(['handle', 'on_activate', 'ping', 'pong', 'extra_headers'])
         _sets = {'extra_headers': 'channel'}
         _as_list = ['handle','on_activate']
+        defaults = {'throttle_logging_level': 0}
         
         for name in funcs:
             set = _sets.get(name, 'cnx')
@@ -109,7 +110,7 @@ class ChannelsInfo:
             url = self.get_value(channel, 'url_factory').copy(params),
             **funcs,
             **{
-               x: self.get_value(profile, x, set='cnx')
+               x: self.get_value(profile, x, defaults.get(x), set='cnx')
                 for x in ['signalr', 'hub_name', 'hub_methods', 'socketio', 'event_names',
                           'reconnect_try_interval', 'connect_timeout', 'recv_timeout', 
                           'ping_interval', 'ping_after', 'ping_as_message',
