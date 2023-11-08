@@ -11,7 +11,7 @@ from .transports import Transport
 
 
 class Connection(object):
-    protocol_version = '1.5'
+    protocol_version = "1.5"
 
     def __init__(self, url, session=None):
         self.url = url
@@ -39,7 +39,8 @@ class Connection(object):
         if name not in self.__hubs:
             if self.started:
                 raise RuntimeError(
-                    'Cannot create new hub because connection is already started.')
+                    "Cannot create new hub because connection is already started."
+                )
             self.__hubs[name] = Hub(name, self)
             return self.__hubs[name]
 
