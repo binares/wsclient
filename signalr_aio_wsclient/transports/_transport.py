@@ -9,6 +9,7 @@ try:
     ModuleNotFoundError
 except NameError:
     ModuleNotFoundError = ImportError
+import platform
 
 # -----------------------------------
 # Internal Imports
@@ -31,6 +32,8 @@ try:
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 except ModuleNotFoundError:
     pass
+
+_DECLUDE_LOOP = platform.python_version_tuple() >= ("3", "10", "0")
 
 
 class Transport:
@@ -67,7 +70,8 @@ class Transport:
         except RuntimeError:
             self.ws_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.ws_loop)
-        self.invoke_queue = asyncio.Queue(loop=self.ws_loop)
+        _queuekw = {} if _DECLUDE_LOOP else {"loop": self.ws_loop}
+        self.invoke_queue = asyncio.Queue(**_queuekw)
 
     def _connect(self):
         self._conn_handler = asyncio.ensure_future(
@@ -90,7 +94,6 @@ class Transport:
         )
         done, pending = await asyncio.wait(
             [consumer_task, producer_task],
-            loop=self.ws_loop,
             return_when=asyncio.FIRST_EXCEPTION,
         )
 

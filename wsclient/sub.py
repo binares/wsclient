@@ -167,7 +167,7 @@ class SubscriptionHandler:
                 self.wc.log("adding provider sub {} for {}".format(dep, s.id_tuple))
                 self.add_subscription(dep, dependants=[s])
 
-        if self.wc.tp._thread.isAlive() and self.wc.is_active():
+        if self.wc.tp._thread.is_alive() and self.wc.is_active():
             return s.push()
 
         return True

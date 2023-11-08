@@ -11,11 +11,13 @@ import asyncio
 import copy as _copy
 import functools
 from collections import defaultdict
+import platform
 
 from .sub import Merged
 
 logger, logger2, tlogger, tloggers, tlogger0 = _log.get_standard_5(__name__)
 
+_DECLUDE_LOOP = platform.python_version_tuple() >= ("3", "10", "0")
 # Number of WSClient objects per thread. For infinite set to 0.
 sockets_per_thread = 1
 threads = set()
@@ -60,13 +62,15 @@ class Transport:
 
         self.wc._loop = self._thread._loop
 
+        _queuekw = {} if _DECLUDE_LOOP else {"loop": self.wc._loop}
+        queuekw = {} if _DECLUDE_LOOP else {"loop": self.wc.loop}
         # "_" beginning of an attr signifies that _thread._loop is used
-        self._event_queue = asyncio.Queue(0, loop=self.wc._loop)
-        self.recv_queue = asyncio.Queue(0, loop=self.wc.loop)
+        self._event_queue = asyncio.Queue(0, **_queuekw)
+        self.recv_queue = asyncio.Queue(0, **queuekw)
         self.send_queue = asyncio.Queue(
-            self.wc.queue_maxsizes.get("send", 0), loop=self.wc.loop
+            self.wc.queue_maxsizes.get("send", 0), **queuekw
         )
-        self._send_event = asyncio.Event(loop=self.wc._loop)
+        self._send_event = asyncio.Event(**_queuekw)
 
         self._event_queue.name = "{}[EQ]".format(self.wc.name)
         self.recv_queue.name = "{}[RQ]".format(self.wc.name)
@@ -81,7 +85,7 @@ class Transport:
         # For adding more queues, use self.wc.add_event_queue / self.wc.add_recv_queue
         #
         self.user_event_queue = ueq = asyncio.Queue(
-            self.wc.queue_maxsizes.get("event", 100), loop=self.wc.loop
+            self.wc.queue_maxsizes.get("event", 100), **queuekw
         )
         ueq.name = "{}[UEQ]".format(self.wc.name)
         ueq.warn = False
@@ -173,7 +177,7 @@ class Transport:
             f1 = call_via_loop(wrap_trylog(self._main), loop=_loop, module="asyncio")
             f2 = call_via_loop(self.process_events, loop=_loop, module="asyncio")
 
-            if not self._thread.isAlive():
+            if not self._thread.is_alive():
                 self._thread.start()
 
             await self.process_responses()
@@ -662,7 +666,11 @@ class Transport:
             if "start" in self.futures:
                 for attr in ("recv_queue", "send_queue", "_event_queue"):
                     queue = getattr(self, attr)
-                    call_via_loop(force_put, (queue, _quit_command), loop=queue._loop)
+                    call_via_loop(
+                        force_put,
+                        (queue, _quit_command),
+                        loop=getattr(queue, "_loop", None),
+                    )
 
                 try:
                     await self.futures["start"]
