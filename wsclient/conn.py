@@ -5,14 +5,13 @@ import sys
 import json
 import asyncio
 import inspect
-import platform
 import time
 import datetime
 
 dt = datetime.datetime
 td = datetime.timedelta
 
-from fons.aio import call_via_loop_afut
+from fons.aio import call_via_loop_afut, FonsQueue
 from fons.debug import safeTry, safeAsyncTry
 
 from fons.event import Station, Event, force_put, empty_queue, create_name
@@ -23,7 +22,6 @@ import fons.log as _log
 logger, logger2, tlogger, tloggers, tlogger0 = _log.get_standard_5(__name__)
 
 
-_DECLUDE_LOOP = platform.python_version_tuple() >= ("3", "10", "0")
 _CONNECTION_IDS = set()
 _CONNECTION_NAMES = set()
 _stop_command = object()
@@ -120,7 +118,7 @@ class Connection:
         self.hub = None
         self.loop = loop if loop is not None else asyncio.get_event_loop()
         q = next((x for x in (recv_queue, event_queue) if x is not None), None)
-        if out_loop is None and q is not None and getattr(q, "_loop", None):
+        if out_loop is None and q is not None:
             out_loop = q._loop
         self.out_loop = out_loop if out_loop is not None else self.loop
 
@@ -164,11 +162,7 @@ class Connection:
         def _add_q(ch, q_id, queue):
             maxsizes = {"event": 100}
             # only add to out_loop
-            loops = (
-                [0]
-                if queue is None
-                else [getattr(queue, "_loop", None) or asyncio.get_event_loop()]
-            )
+            loops = [0] if queue is None else [queue._loop]
             self.station.add_queue(
                 ch,
                 q_id,
@@ -338,8 +332,7 @@ class Connection:
         await self._exit_conn()
         # Renew the queue to ensure that we won't be receiving anything from previous sockets
         # TODO: set max size to this queue?
-        _queuekw = {} if _DECLUDE_LOOP else {"loop": self.loop}
-        self._socket_recv_queue = asyncio.Queue(**_queuekw)
+        self._socket_recv_queue = FonsQueue(loop=self.loop)
         self.conn = None
         fut = asyncio.ensure_future(self._connect())
         wait_started = time.time()
