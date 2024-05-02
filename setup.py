@@ -4,6 +4,9 @@ from setuptools import setup, find_packages
 HERE = pathlib.Path(__file__).parent
 README = (HERE / "README.md").read_text()
 
+with open(HERE / "requirements.txt", encoding="utf-8") as f:
+    requirements = f.read().split("\n")
+
 setup(
     name="wsclient",
     version="0.4.0",
@@ -16,10 +19,5 @@ setup(
     license="MIT",
     packages=find_packages(exclude=["test"]),
     python_requires=">=3.5",
-    install_requires=[
-        "requests>=2.18.4",
-        "websockets>=4.0.1",
-        "python-socketio[asyncio_client]>=4.6.0",  # tested 4.6
-        "fons>=0.3.1",
-    ],
+    install_requires=requirements,
 )
